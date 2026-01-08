@@ -630,14 +630,28 @@ def main_dashboard():
     # Fetch Data
     if ticker_symbol:
         try:
-            stock = yf.Ticker(ticker_symbol)
+            # 1. Clean the ticker input
+            clean_ticker = str(ticker_symbol).strip().upper()
+            if not clean_ticker:
+                st.error("Ticker symbol is empty. Please enter a valid symbol.")
+                return
+
+            stock = yf.Ticker(clean_ticker)
+            
+            # Check if we actually got data (history is a good test)
+            hist_check = stock.history(period="1d")
+            if hist_check.empty:
+                st.error(f"No data found for '{clean_ticker}'. Check the symbol on Yahoo Finance.")
+                return
+
             info = stock.info
             # Basic validation
             if 'symbol' not in info and 'currentPrice' not in info:
-                st.error("Invalid Ticker. Please try again.")
+                st.error("Invalid Ticker Data. Please try again.")
                 return
-        except:
-             st.error("Could not fetch data. Check internet or ticker.")
+        except Exception as e:
+             print(f"DEBUG: yfinance error for {ticker_symbol}: {e}")
+             st.error(f"Could not fetch data for {ticker_symbol}. Check internet or ticker.")
              return
     else:
         st.info("Please enter a ticker symbol.")
