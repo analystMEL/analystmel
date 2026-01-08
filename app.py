@@ -411,7 +411,15 @@ def main_dashboard():
             color: #0b132b !important;
             font-family: 'Helvetica Neue', 'Arial', sans-serif;
         }
-        [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div, [data-testid="stSidebar"] label, [data-testid="stSidebar"] input {
+        
+        /* FIX: Ensures the Ticker Input text is visible (White) */
+        [data-testid="stSidebar"] input {
+            color: #FFFFFF !important;
+            background-color: #1c2541 !important; /* Contrasting dark background */
+            -webkit-text-fill-color: #FFFFFF !important; /* Force for Safari/Chrome */
+        }
+
+        [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div, [data-testid="stSidebar"] label {
             color: #0b132b !important;
             font-weight: 500;
         }
@@ -598,7 +606,7 @@ def main_dashboard():
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ **Configuration**")
-    ticker_symbol = st.sidebar.text_input("Stock Ticker", value="AAPL").upper()
+    ticker_symbol = st.sidebar.text_input("Stock Ticker", value="AAPL", help="Try: AAPL, MSFT, NVDA, GOOGL").upper()
     
     if page == "Financial Analysis":
         pass # Removed DCF Settings from here
