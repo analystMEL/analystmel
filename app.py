@@ -228,6 +228,11 @@ def fetch_comparison_data(main_ticker, competitors):
             roe = info.get('returnOnEquity')
             ev_ebitda = info.get('enterpriseToEbitda')
             
+            # Growth Metrics
+            ps = info.get('priceToSalesTrailing12Months')
+            ev_rev = info.get('enterpriseToRevenue')
+            rev_growth = info.get('revenueGrowth')
+            
             # Returns (ROI)
             roi_1y = None
             roi_5y = None
@@ -250,6 +255,9 @@ def fetch_comparison_data(main_ticker, competitors):
                 "PEG": peg if peg else np.nan,
                 "ROE": roe if roe else np.nan,
                 "EV/EBITDA": ev_ebitda if ev_ebitda else np.nan,
+                "P/S": ps if ps else np.nan,
+                "EV/Revenue": ev_rev if ev_rev else np.nan,
+                "Rev Growth": rev_growth if rev_growth else np.nan,
                 "1Y ROI": roi_1y,
                 "5Y ROI": roi_5y
             })
@@ -607,6 +615,21 @@ def main_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ **Configuration**")
     ticker_symbol = st.sidebar.text_input("Stock Ticker", value="AAPL", help="Try: AAPL, MSFT, NVDA, GOOGL").upper()
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⭐ **Watchlist**")
+    
+    # Initialize watchlist in session state
+    if 'watchlist' not in st.session_state:
+        st.session_state.watchlist = ["AAPL", "TSLA", "NVDA"]
+
+    # Multiselect for managing the watchlist
+    watchlist_options = st.sidebar.multiselect(
+        "Your Favorites:", 
+        options=list(set(st.session_state.watchlist + [ticker_symbol])), 
+        default=st.session_state.watchlist
+    )
+    st.session_state.watchlist = watchlist_options
     
     if page == "Financial Analysis":
         pass # Removed DCF Settings from here
@@ -1312,38 +1335,63 @@ def main_dashboard():
                         }).apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
                     )
                     
-                    # --- EV/EBITDA Table ---
-                    st.subheader("🏭 Industry EV/EBITDA Comparison")
-                    ev_df = comp_df[['Ticker', 'EV/EBITDA']].copy()
-                    st.dataframe(
-                        ev_df.style.format({"EV/EBITDA": "{:.2f}"})
-                        .apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
-                    )
+                    if is_unprofitable:
+                         st.markdown("#### 🚀 Startup/Growth Comparison Table")
+                         growth_cols = ['Ticker', 'P/S', 'EV/Revenue', 'Rev Growth']
+                         growth_df = comp_df[growth_cols].copy()
+                         st.dataframe(
+                            growth_df.style.format({
+                                "P/S": "{:.2f}",
+                                "EV/Revenue": "{:.2f}",
+                                "Rev Growth": "{:.2%}"
+                            }).apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
+                        )
+                    else:
+                         # --- EV/EBITDA Table ---
+                         st.subheader("🏭 Industry EV/EBITDA Comparison")
+                         ev_df = comp_df[['Ticker', 'EV/EBITDA']].copy()
+                         st.dataframe(
+                             ev_df.style.format({"EV/EBITDA": "{:.2f}"})
+                             .apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
+                         )
 
                     st.markdown("---")
 
                     # --- Industry Averages Section ---
                     st.markdown("#### 📊 Industry Averages")
                     
-                    # Calculate Averages
-                    avg_pe = comp_df['P/E'].mean()
-                    avg_peg = comp_df['PEG'].mean()
-                    avg_roe = comp_df['ROE'].mean()
-                    avg_1y = comp_df['1Y ROI'].mean()
-                    avg_5y = comp_df['5Y ROI'].mean()
-                    
-                    # Display Averages
-                    c_avg1, c_avg2, c_avg3, c_avg4, c_avg5 = st.columns(5)
-                    with c_avg1:
-                        display_custom_metric("Avg P/E", f"{avg_pe:.2f}" if not pd.isna(avg_pe) else "N/A")
-                    with c_avg2:
-                        display_custom_metric("Avg PEG", f"{avg_peg:.2f}" if not pd.isna(avg_peg) else "N/A")
-                    with c_avg3:
-                        display_custom_metric("Avg ROE", f"{avg_roe:.2f}" if not pd.isna(avg_roe) else "N/A")
-                    with c_avg4:
-                        display_custom_metric("Avg 1Y ROI", f"{avg_1y:.2%}" if not pd.isna(avg_1y) else "N/A")
-                    with c_avg5:
-                        display_custom_metric("Avg 5Y ROI", f"{avg_5y:.2%}" if not pd.isna(avg_5y) else "N/A")
+                    if is_unprofitable:
+                        avg_ps = comp_df['P/S'].mean()
+                        avg_ev_rev = comp_df['EV/Revenue'].mean()
+                        avg_rev_g = comp_df['Rev Growth'].mean()
+                        
+                        c_avg1, c_avg2, c_avg3 = st.columns(3)
+                        with c_avg1:
+                            display_custom_metric("Avg P/S", f"{avg_ps:.2f}" if not pd.isna(avg_ps) else "N/A")
+                        with c_avg2:
+                             display_custom_metric("Avg EV/Rev", f"{avg_ev_rev:.2f}" if not pd.isna(avg_ev_rev) else "N/A")
+                        with c_avg3:
+                             display_custom_metric("Avg Rev Growth", f"{avg_rev_g:.2%}" if not pd.isna(avg_rev_g) else "N/A")
+                    else:
+                        # Calculate Averages
+                        avg_pe = comp_df['P/E'].mean()
+                        avg_peg = comp_df['PEG'].mean()
+                        avg_roe = comp_df['ROE'].mean()
+                        avg_1y = comp_df['1Y ROI'].mean()
+                        avg_5y = comp_df['5Y ROI'].mean()
+                        
+                        # Display Averages
+                        c_avg1, c_avg2, c_avg3, c_avg4, c_avg5 = st.columns(5)
+                        with c_avg1:
+                            display_custom_metric("Avg P/E", f"{avg_pe:.2f}" if not pd.isna(avg_pe) else "N/A")
+                        with c_avg2:
+                            display_custom_metric("Avg PEG", f"{avg_peg:.2f}" if not pd.isna(avg_peg) else "N/A")
+                        with c_avg3:
+                            display_custom_metric("Avg ROE", f"{avg_roe:.2f}" if not pd.isna(avg_roe) else "N/A")
+                        with c_avg4:
+                            display_custom_metric("Avg 1Y ROI", f"{avg_1y:.2%}" if not pd.isna(avg_1y) else "N/A")
+                        with c_avg5:
+                            display_custom_metric("Avg 5Y ROI", f"{avg_5y:.2%}" if not pd.isna(avg_5y) else "N/A")
                     
                     st.markdown("---")
 
@@ -1353,51 +1401,89 @@ def main_dashboard():
                     # Get Main Ticker Values
                     main_row = comp_df[comp_df['Ticker'] == ticker_symbol]
                     if not main_row.empty:
-                        main_pe = main_row.iloc[0]['P/E']
-                        main_roe = main_row.iloc[0]['ROE']
                         
-                        if not pd.isna(main_pe) and not pd.isna(avg_pe) and not pd.isna(main_roe) and not pd.isna(avg_roe):
-                            # Create a container for the key metrics
-                            with st.container():
-                                col1, col2 = st.columns(2)
+                        if is_unprofitable:
+                            main_ps = main_row.iloc[0]['P/S']
+                            main_rev_g = main_row.iloc[0]['Rev Growth']
+                            avg_ps = comp_df['P/S'].mean()
+                            avg_rev_g = comp_df['Rev Growth'].mean()
+                            
+                            if not pd.isna(main_ps) and not pd.isna(avg_ps):
+                                with st.container():
+                                    col1, col2 = st.columns(2)
+                                    ps_diff = ((main_ps - avg_ps) / avg_ps) * 100
+                                    
+                                    with col1:
+                                        st.metric(
+                                            label="Valuation (P/S)",
+                                            value=f"{main_ps:.2f}",
+                                            delta=f"{ps_diff:.1f}% vs Industry",
+                                            delta_color="inverse"
+                                        )
+                                        st.caption(f"Industry Average: {avg_ps:.2f}")
+                                    
+                                    with col2:
+                                        if not pd.isna(main_rev_g) and not pd.isna(avg_rev_g):
+                                            rev_diff = (main_rev_g - avg_rev_g)
+                                            st.metric(
+                                                label="Growth (Revenue)",
+                                                value=f"{main_rev_g:.2%}",
+                                                delta=f"{rev_diff*100:.1f}% vs Avg",
+                                                delta_color="normal"
+                                            )
+                                            st.caption(f"Industry Average: {avg_rev_g:.2%}")
                                 
-                                # P/E Metric Card
-                                pe_diff = ((main_pe - avg_pe) / avg_pe) * 100
-                                with col1:
-                                    st.metric(
-                                        label="Valuation (P/E)", 
-                                        value=f"{main_pe:.2f}", 
-                                        delta=f"{pe_diff:.1f}% vs Industry",
-                                        delta_color="inverse" # Red if higher (expensive), Green if lower (cheap)
-                                    )
-                                    st.caption(f"Industry Average: {avg_pe:.2f}")
+                                st.markdown("### 💡 Interpretation")
+                                st.info("For growth companies, a lower P/S ratio combined with higher revenue growth suggests a potential opportunity. Compare EV/Revenue to validate.")
+                            else:
+                                st.info("Insufficient data for growth verdict.")
 
-                                # ROE Metric Card
-                                with col2:
-                                    st.metric(
-                                        label="Efficiency (ROE)", 
-                                        value=f"{main_roe:.2f}", 
-                                        delta=f"{(main_roe - avg_roe):.2f} vs Avg",
-                                        delta_color="normal" # Green if higher (good)
-                                    )
-                                    st.caption(f"Industry Average: {avg_roe:.2f}")
-
-                            # Interpretation Section
-                            st.markdown("### 💡 Interpretation")
-                            
-                            pe_status = "undervalued" if main_pe < avg_pe else "overvalued"
-                            st.info(
-                                f"**Growth/Value Signal:** A P/E of {main_pe:.2f} suggests the market expects higher future growth "
-                                f"or the stock is currently **{pe_status}** compared to the industry average of {avg_pe:.2f}."
-                            )
-                            
-                            with st.expander("View Management Quality Breakdown"):
-                                if main_roe > avg_roe:
-                                    st.write(f"The ROE of {main_roe:.2f} indicates superior management and capital allocation compared to the industry average.")
-                                else:
-                                    st.write(f"The ROE of {main_roe:.2f} indicates management efficiency is lagging behind the industry average.")
                         else:
-                            st.info("Insufficient data for full automated verdict.")
+                            main_pe = main_row.iloc[0]['P/E']
+                            main_roe = main_row.iloc[0]['ROE']
+                            
+                            if not pd.isna(main_pe) and not pd.isna(avg_pe) and not pd.isna(main_roe) and not pd.isna(avg_roe):
+                                # Create a container for the key metrics
+                                with st.container():
+                                    col1, col2 = st.columns(2)
+                                    
+                                    # P/E Metric Card
+                                    pe_diff = ((main_pe - avg_pe) / avg_pe) * 100
+                                    with col1:
+                                        st.metric(
+                                            label="Valuation (P/E)", 
+                                            value=f"{main_pe:.2f}", 
+                                            delta=f"{pe_diff:.1f}% vs Industry",
+                                            delta_color="inverse" # Red if higher (expensive), Green if lower (cheap)
+                                        )
+                                        st.caption(f"Industry Average: {avg_pe:.2f}")
+
+                                    # ROE Metric Card
+                                    with col2:
+                                        st.metric(
+                                            label="Efficiency (ROE)", 
+                                            value=f"{main_roe:.2f}", 
+                                            delta=f"{(main_roe - avg_roe):.2f} vs Avg",
+                                            delta_color="normal" # Green if higher (good)
+                                        )
+                                        st.caption(f"Industry Average: {avg_roe:.2f}")
+
+                                # Interpretation Section
+                                st.markdown("### 💡 Interpretation")
+                                
+                                pe_status = "undervalued" if main_pe < avg_pe else "overvalued"
+                                st.info(
+                                    f"**Growth/Value Signal:** A P/E of {main_pe:.2f} suggests the market expects higher future growth "
+                                    f"or the stock is currently **{pe_status}** compared to the industry average of {avg_pe:.2f}."
+                                )
+                                
+                                with st.expander("View Management Quality Breakdown"):
+                                    if main_roe > avg_roe:
+                                        st.write(f"The ROE of {main_roe:.2f} indicates superior management and capital allocation compared to the industry average.")
+                                    else:
+                                        st.write(f"The ROE of {main_roe:.2f} indicates management efficiency is lagging behind the industry average.")
+                            else:
+                                st.info("Insufficient data for full automated verdict.")
                     else:
                         st.info("Ticker data not found in comparison.")
 
