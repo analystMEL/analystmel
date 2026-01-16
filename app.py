@@ -301,6 +301,42 @@ def display_custom_metric(label, value, prefix="", suffix="", help_text=None, co
     </div>
     """, unsafe_allow_html=True)
 
+# --- HELPER: DCF CALCULATOR ---
+def calculate_dcf_value(fcf_input, growth_rate, terminal_growth, discount_rate, debt_input, cash_input, shares):
+    """
+    Calculates Intrinsic Value based on DCF inputs.
+    Returns: intrinsic_share_price (float)
+    """
+    try:
+        if fcf_input <= 0:
+            return 0.0
+            
+        future_fcf = []
+        for i in range(1, 6):
+            fcf = fcf_input * ((1 + growth_rate) ** i)
+            future_fcf.append(fcf)
+        
+        terminal_val = future_fcf[-1] * (1 + terminal_growth) / (discount_rate - terminal_growth)
+        
+        dcf_value = 0
+        for i, cash in enumerate(future_fcf):
+            dcf_value += cash / ((1 + discount_rate) ** (i + 1))
+        
+        pv_terminal = terminal_val / ((1 + discount_rate) ** 5)
+        
+        # Enterprise Value
+        enterprise_value = dcf_value + pv_terminal
+        
+        # Equity Value = EV - Debt + Cash
+        equity_value = enterprise_value - debt_input + cash_input
+        
+        if not shares: shares = 1
+        
+        intrinsic_share_price = equity_value / shares
+        return intrinsic_share_price
+    except:
+        return 0.0
+
 # --- HELPER: ROBUST VALUATION FETCHER ---
 def get_valuation_data(stock, info):
     """
@@ -394,6 +430,35 @@ def get_valuation_data(stock, info):
         data['peg_source'] = "Yahoo Finance"
         
     return data
+
+def classify_cash_position(stock):
+    """
+    Diagnoses if a company is 'Cash Stable' or 'Cash Burning'.
+    Returns: status (str), runway (months), burn_rate (monthly)
+    """
+    try:
+        cf = stock.cashflow
+        bs = stock.balance_sheet
+        
+        # 1. Get Latest Annual Free Cash Flow (FCF)
+        if not cf.empty and 'Free Cash Flow' in cf.index:
+            latest_fcf = cf.loc['Free Cash Flow'].iloc[0]
+        else:
+            latest_fcf = -1 # Fallback to burning if data missing
+            
+        # 2. Get Total Cash on Hand
+        cash_on_hand = bs.loc['Cash And Cash Equivalents'].iloc[0] if 'Cash And Cash Equivalents' in bs.index else 0
+        
+        # 3. Logic: If FCF is negative, it's a Cash Burner
+        if latest_fcf < 0:
+            monthly_burn = abs(latest_fcf) / 12
+            runway_months = cash_on_hand / monthly_burn if monthly_burn > 0 else 999
+            return "Cash Burning", runway_months, monthly_burn
+        else:
+            return "Cash Stable", None, 0
+            
+    except:
+        return "Unknown", None, 0
 
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
@@ -1023,29 +1088,9 @@ def main_dashboard():
         # Calculation
         if fcf_input > 0:
             try:
-                future_fcf = []
-                for i in range(1, 6):
-                    fcf = fcf_input * ((1 + growth_rate) ** i)
-                    future_fcf.append(fcf)
-                
-                terminal_val = future_fcf[-1] * (1 + terminal_growth) / (discount_rate - terminal_growth)
-                
-                dcf_value = 0
-                for i, cash in enumerate(future_fcf):
-                    dcf_value += cash / ((1 + discount_rate) ** (i + 1))
-                
-                pv_terminal = terminal_val / ((1 + discount_rate) ** 5)
-                
-                # Enterprise Value
-                enterprise_value = dcf_value + pv_terminal
-                
-                # Equity Value = EV - Debt + Cash
-                equity_value = enterprise_value - debt_input + cash_input
-                
                 shares = info.get('sharesOutstanding', 1)
-                if not shares: shares = 1
+                intrinsic_share_price = calculate_dcf_value(fcf_input, growth_rate, terminal_growth, discount_rate, debt_input, cash_input, shares)
                 
-                intrinsic_share_price = equity_value / shares
                 current_p = info.get('currentPrice', 0)
 
                 # Results Display
@@ -1089,8 +1134,8 @@ def main_dashboard():
     
     # --- PAGE 3: Valuation Analysis ---
     elif page == "Valuation Analysis":
-        st.markdown(f'<div class="fun-header">⚖️ Valuation Analysis: {ticker_symbol}</div>', unsafe_allow_html=True)
-        st.subheader("Key Valuation Ratios")
+        st.markdown(f'<div class="fun-header">⚖️ Smart Valuation: {ticker_symbol}</div>', unsafe_allow_html=True)
+        # st.subheader("Key Valuation Ratios") # Removed subheader to fit new design
 
         val_data = get_valuation_data(stock, info)
         
@@ -1108,15 +1153,7 @@ def main_dashboard():
         div_yield = info.get('dividendYield')
         ev_ebitda = info.get('enterpriseToEbitda')
 
-        # Determine Company Profile
-        is_unprofitable = (eps is None or eps < 0)
-        
-        if is_unprofitable:
-            st.info("💡 **Profile: Startup / High Growth** - This company appears to have negative earnings. Valuation focus should be on Sales and Growth.")
-        else:
-            st.success("💡 **Profile: Established / Profitable** - This company has positive earnings. Valuation focus can be on Earnings (P/E) and Returns.")
-
-        # Define Segments
+        # Define Segments (Before calling them)
         def render_growth_segment():
             st.markdown("### 🚀 Segment 1: Growth & Sales (Startup Focus)")
             st.markdown("Metrics used for companies focusing on market expansion over immediate profit.")
@@ -1174,6 +1211,45 @@ def main_dashboard():
                 
                 if eps:
                      st.markdown(f"**EPS ($):** {eps:.2f} ({val_data['eps_source']})")
+
+                # --- DCF Snippet ---
+                st.markdown("#### 🔮 DCF Snapshot")
+                # Try to get DCF inputs from session state or defaults
+                # Use defaults if session state is 0.0 (uninitialized for new ticker logic above)
+                dcf_fcf = st.session_state.get('dcf_fcf', 0.0)
+                if dcf_fcf == 0.0:
+                     # Try auto-fetch again if not set (simple version)
+                     try:
+                        cf_stmt = stock.cashflow
+                        if not cf_stmt.empty and 'Free Cash Flow' in cf_stmt.index:
+                            dcf_fcf = float(cf_stmt.loc['Free Cash Flow'].iloc[0])
+                     except: pass
+                
+                if dcf_fcf > 0:
+                    dcf_growth = st.session_state.get('dcf_growth', 10.0) / 100.0
+                    dcf_term = st.session_state.get('dcf_terminal', 2.5) / 100.0
+                    dcf_wacc = st.session_state.get('dcf_wacc', 9.0) / 100.0
+                    dcf_debt = st.session_state.get('dcf_debt', 0.0)
+                    dcf_cash = st.session_state.get('dcf_cash', 0.0)
+                    
+                    # If debt/cash are 0, try fetching if not done
+                    if dcf_debt == 0.0:
+                         try: 
+                             bs_stmt = stock.balance_sheet
+                             if not bs_stmt.empty and 'Total Debt' in bs_stmt.index: dcf_debt = float(bs_stmt.loc['Total Debt'].iloc[0])
+                         except: pass
+                    
+                    shares_out = info.get('sharesOutstanding', 1)
+                    
+                    intrinsic_val = calculate_dcf_value(dcf_fcf, dcf_growth, dcf_term, dcf_wacc, dcf_debt, dcf_cash, shares_out)
+                    
+                    curr_p = info.get('currentPrice', 0)
+                    delta_color = "green" if intrinsic_val > curr_p else "red"
+                    
+                    display_custom_metric("Intrinsic Value (DCF)", f"${intrinsic_val:.2f}", color=delta_color)
+                    st.caption(f"Based on {dcf_growth*100:.0f}% growth (5yr) & {dcf_wacc*100:.0f}% WACC.")
+                else:
+                    st.info("DCF Model requires positive Free Cash Flow.")
 
             with c2:
                 st.markdown("#### PEG Analysis")
@@ -1298,15 +1374,42 @@ def main_dashboard():
                      st.info("PEG Ratio data not available (requires positive earnings/growth).")
             st.markdown("---")
 
-        # Conditional Layout
-        if is_unprofitable:
-            render_growth_segment()
-            with st.expander("Show Profitability Metrics (Not Applicable)", expanded=False):
-                render_profit_segment()
+        # --- PHASE 1: DIAGNOSTIC ---
+        status, runway, monthly_burn = classify_cash_position(stock)
+        is_unprofitable = (status == "Cash Burning")
+        
+        if status == "Cash Burning":
+            st.warning(f"🧪 **Diagnostic: Cash Burning (Growth Phase)**")
+            st.write(f"This company is currently spending more than it earns to scale operations. Traditional P/E models are not applicable.")
+            
+            # Show Runway Card
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Monthly Burn", f"-${monthly_burn/1e6:.1f}M")
+            with col2:
+                # Color code runway: Green > 24m, Yellow > 12m, Red < 12m
+                r_color = "normal" if runway > 18 else "inverse"
+                st.metric("Cash Runway", f"{runway:.1f} Months", delta_color=r_color)
+            with col3:
+                st.metric("Classification", "High Growth")
+
+            st.markdown("---")
+            # Trigger Segment 1 Analysis (Sales & Growth)
+            render_growth_segment() # Your existing P/S and EV/Rev code
+            
         else:
-            render_profit_segment()
-            with st.expander("Show Growth Metrics (Secondary)", expanded=True):
-                render_growth_segment()
+            st.success(f"🏛️ **Diagnostic: Cash Stable (Mature Phase)**")
+            st.write(f"This company is generating positive cash flow. We will use Earnings-based and Intrinsic Value models.")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Annual FCF", f"Positive ✅")
+            with col2:
+                st.metric("Classification", "Value / Established")
+
+            st.markdown("---")
+            # Trigger Segment 2 Analysis (DCF & P/E)
+            render_profit_segment() # Your existing DCF and P/E code
         
         # --- Comparison Segment ---
         st.markdown("---")
@@ -1660,10 +1763,11 @@ def generate_ai_verdict(info, news, history):
     return verdict, sentiment_score
 
 # --- CONTROLLER ---
-if 'splash_complete' not in st.session_state:
-    st.session_state.splash_complete = False
+if __name__ == "__main__":
+    if 'splash_complete' not in st.session_state:
+        st.session_state.splash_complete = False
 
-if not st.session_state.splash_complete:
-    splash_screen()
-else:
-    main_dashboard()
+    if not st.session_state.splash_complete:
+        splash_screen()
+    else:
+        main_dashboard()
