@@ -463,6 +463,7 @@ def classify_cash_position(stock):
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
+    # --- GLOBAL UI READABILITY FIX ---
     st.markdown("""
     <style>
         /* --- Formal Font Stack --- */
@@ -485,19 +486,50 @@ def main_dashboard():
             color: #0b132b !important;
             font-family: 'Helvetica Neue', 'Arial', sans-serif;
         }
-        
-        /* FIX: Ensures the Ticker Input text is visible (White) */
-        [data-testid="stSidebar"] input {
+
+        /* 1. Force all Metric Labels (The titles like 'Annual FCF') to White */
+        [data-testid="stMetricLabel"] {
             color: #FFFFFF !important;
-            background-color: #1c2541 !important; /* Contrasting dark background */
-            -webkit-text-fill-color: #FFFFFF !important; /* Force for Safari/Chrome */
+            font-weight: bold !important;
         }
 
-        [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div, [data-testid="stSidebar"] label {
-            color: #0b132b !important;
-            font-weight: 500;
+        /* 2. Force all Metric Values (The actual numbers/results) to White */
+        [data-testid="stMetricValue"] {
+            color: #FFFFFF !important;
+        }
+
+        /* 3. Force Sidebar Labels and Text to White */
+        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
+            color: #FFFFFF !important;
+        }
+
+        /* 4. Fix for the 'Blacked Out' Input Boxes */
+        .stTextInput input {
+            color: #FFFFFF !important;
+            background-color: #1c2541 !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+        }
+
+        /* 5. Force standard markdown text in containers to White */
+        .stMarkdown p, .stMarkdown div {
+            color: #FFFFFF !important;
+        }
+
+        /* 6. Ensure Tab titles are visible */
+        button[data-baseweb="tab"] p {
+            color: #cbd5e1 !important;
+        }
+        button[aria-selected="true"] p {
+            color: #FFFFFF !important;
         }
         
+        /* 7. Specific fix for the 'Annual FCF' and Metric boxes background */
+        div[data-testid="stMetric"] {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
         /* --- Formal Header (No gradient text) --- */
         .fun-header {
             color: #ffffff;
@@ -528,57 +560,6 @@ def main_dashboard():
         }
         .stSlider [data-testid="stMarkdownContainer"] p, .stNumberInput [data-testid="stMarkdownContainer"] p {
              color: #ffffff !important;
-        }
-        
-        /* --- Glassmorphism Metrics Cards (Formal) --- */
-        div[data-testid="stMetric"] {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 5px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s;
-        }
-        div[data-testid="stMetric"]:hover {
-            transform: translateY(-2px);
-            border-color: #6fffe9;
-        }
-        /* Force label text to be white */
-        div[data-testid="stMetricLabel"] {
-            color: #ffffff !important; 
-            font-weight: bold;
-            font-family: 'Helvetica Neue', sans-serif;
-        }
-        div[data-testid="stMetricLabel"] > div, 
-        div[data-testid="stMetricLabel"] > label, 
-        div[data-testid="stMetricLabel"] p {
-            color: #ffffff !important;
-        }
-        
-        /* Force value text to be white */
-        div[data-testid="stMetricValue"] {
-            color: #ffffff !important;
-            font-family: 'Courier New', monospace;
-        }
-        div[data-testid="stMetricValue"] > div {
-            color: #ffffff !important;
-        }
-        
-        /* Targets the big numeric value in st.metric */
-        [data-testid="stMetricValue"] {
-            font-family: 'Arial', sans-serif !important;
-            font-weight: 700;
-        }
-
-        /* Targets the label (text above the number) in st.metric */
-        [data-testid="stMetricLabel"] {
-            font-family: 'Arial', sans-serif !important;
-        }
-
-        /* Targets the delta (the green/red percentage text) */
-        [data-testid="stMetricDelta"] {
-            font-family: 'Arial', sans-serif !important;
         }
         
         /* --- Tabs --- */
