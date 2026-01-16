@@ -463,7 +463,7 @@ def classify_cash_position(stock):
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
-    # --- GLOBAL UI READABILITY FIX ---
+    # --- SURGICAL CSS FOR SIDEBAR NAVIGATION ---
     st.markdown("""
     <style>
         /* --- Formal Font Stack --- */
@@ -482,40 +482,44 @@ def main_dashboard():
             background-color: #f0f2f5; 
             border-right: 2px solid #1c2541;
         }
+
+        /* 1. Target the labels of the Radio Buttons in the Sidebar specifically */
+        [data-testid="stSidebar"] .st-emotion-cache-6qob1r, 
+        [data-testid="stSidebar"] .st-emotion-cache-17l69k,
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        /* 2. Target the text of the actual Radio options (the navigation links) */
+        [data-testid="stSidebar"] div[role="radiogroup"] label p {
+            color: #000000 !important;
+            font-size: 1.1em !important;
+        }
+
+        /* 3. Ensure the Sidebar header remains black as well */
         [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-            color: #0b132b !important;
-            font-family: 'Helvetica Neue', 'Arial', sans-serif;
+            color: #000000 !important;
         }
 
-        /* 1. Force all Metric Labels (The titles like 'Annual FCF') to White */
-        [data-testid="stMetricLabel"] {
-            color: #FFFFFF !important;
-            font-weight: bold !important;
-        }
-
-        /* 2. Force all Metric Values (The actual numbers/results) to White */
-        [data-testid="stMetricValue"] {
+        /* 4. Keep the main area Metrics and Titles as White */
+        [data-testid="stMetricLabel"], [data-testid="stMetricValue"], .fun-header {
             color: #FFFFFF !important;
         }
 
-        /* 3. Force Sidebar Labels and Text to White */
-        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
-            color: #FFFFFF !important;
-        }
-
-        /* 4. Fix for the 'Blacked Out' Input Boxes */
+        /* Fix for the 'Blacked Out' Input Boxes */
         .stTextInput input {
             color: #FFFFFF !important;
             background-color: #1c2541 !important;
             -webkit-text-fill-color: #FFFFFF !important;
         }
 
-        /* 5. Force standard markdown text in containers to White */
+        /* Force standard markdown text in containers to White */
         .stMarkdown p, .stMarkdown div {
             color: #FFFFFF !important;
         }
 
-        /* 6. Ensure Tab titles are visible */
+        /* Ensure Tab titles are visible */
         button[data-baseweb="tab"] p {
             color: #cbd5e1 !important;
         }
@@ -523,16 +527,23 @@ def main_dashboard():
             color: #FFFFFF !important;
         }
         
-        /* 7. Specific fix for the 'Annual FCF' and Metric boxes background */
+        /* Glassmorphism Metrics Cards */
         div[data-testid="stMetric"] {
             background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-2px);
+            border-color: #6fffe9;
         }
 
         /* --- Formal Header (No gradient text) --- */
         .fun-header {
-            color: #ffffff;
             font-size: 3em;
             font-weight: 800;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
