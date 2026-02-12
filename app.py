@@ -9,7 +9,7 @@ import requests
 import xml.etree.ElementTree as ET
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Analystmel", layout="wide")
+st.set_page_config(page_title="Valuora", page_icon="🌊", layout="wide")
 
 # --- SPLASH SCREEN LOGIC ---
 def splash_screen():
@@ -107,7 +107,7 @@ def splash_screen():
     
     <div class="splash-container">
         <div class="typewriter">
-            <h1>Analystmel</h1>
+            <h1>Valuora</h1>
             <p style="color: #fbbf24; font-family: 'Courier New', monospace; font-size: 1.5vw; margin-top: 10px; opacity: 0.8;">Made by Om</p>
         </div>
         <div class="ocean">
@@ -667,6 +667,8 @@ def main_dashboard():
     if 'dcf_cash' not in st.session_state: st.session_state.dcf_cash = 0.0
 
     # --- Sidebar Navigation ---
+    with st.sidebar:
+        st.markdown("# 🌊 Valuora")
     st.sidebar.markdown("# 🧭 **Navigation**")
     page = st.sidebar.radio("Select Mode:", ["Financial Analysis", "DCF Model", "Valuation Analysis", "Company Profile & Roadmap"])
     
@@ -749,7 +751,7 @@ def main_dashboard():
     # --- PAGE 1: Financial Analysis ---
     if page == "Financial Analysis":
         # Formal Header
-        st.markdown(f'<div class="fun-header">Analystmel: {ticker_symbol}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="fun-header">Valuora: {ticker_symbol}</div>', unsafe_allow_html=True)
         st.markdown(f"**{info.get('longName', ticker_symbol)}** | Made by Om")
         
         with st.spinner("🤖 AI is reading the charts..."):
@@ -770,7 +772,7 @@ def main_dashboard():
 
         # TAB 1: AI Judgment
         with tabs[0]:
-            st.subheader("🤖 AI Strategic Verdict")
+            st.subheader("🤖 Valuora Verdict")
             verdict_points, score = generate_ai_verdict(info, news, hist)
             
             # Visual Sentiment Meter
