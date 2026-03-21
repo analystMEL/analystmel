@@ -460,6 +460,26 @@ def classify_cash_position(stock):
     except:
         return "Unknown", None, 0
 
+def fetch_macro_indicators():
+    """
+    Fetches key global macro indicators to assess market 'weather'.
+    """
+    macro_tickers = {
+        "Crude Oil (WTI)": "CL=F",
+        "Gold": "GC=F",
+        "Copper": "HG=F",
+        "10Y Treasury Yield": "^TNX"
+    }
+    macro_data = {}
+    for name, ticker in macro_tickers.items():
+        try:
+            data = yf.Ticker(ticker).history(period="1d")
+            if not data.empty:
+                macro_data[name] = data['Close'].iloc[-1]
+        except:
+            macro_data[name] = None
+    return macro_data
+
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
@@ -670,7 +690,7 @@ def main_dashboard():
     with st.sidebar:
         st.markdown("# 🌊 Valuora")
     st.sidebar.markdown("# 🧭 **Navigation**")
-    page = st.sidebar.radio("Select Mode:", ["Financial Analysis", "DCF Model", "Valuation Analysis", "Company Profile & Roadmap"])
+    page = st.sidebar.radio("Select Mode:", ["Financial Analysis", "DCF Model", "Valuation Analysis", "Macro Stress Test", "Company Profile & Roadmap"])
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ **Configuration**")
@@ -1602,7 +1622,50 @@ def main_dashboard():
         *   **> 3.0 (Overvalued):** The stock price is significantly higher than its growth rate would justify. The company needs to significantly exceed expected earnings to justify this valuation, or the price is likely a bubble.
         """)
 
-    # --- PAGE 4: Company Profile ---
+    # --- PAGE 4: Macro Stress Test ---
+    elif page == "Macro Stress Test":
+        st.markdown('<div class="fun-header">🌍 Macro Stress Test</div>', unsafe_allow_html=True)
+
+        macro_stats = fetch_macro_indicators()
+        oil_price = macro_stats.get("Crude Oil (WTI)", 0)
+
+        # --- GLOBAL COMMODITY TICKER TAPE ---
+        cols = st.columns(len(macro_stats))
+        for i, (name, val) in enumerate(macro_stats.items()):
+            cols[i].metric(name, f"${val:.2f}" if name != "10Y Treasury Yield" else f"{val:.2f}%")
+
+        st.markdown("---")
+
+        # --- CHOKEPOINT RISK STATUS (Geopolitical Overlay) ---
+        st.subheader("🚩 Geopolitical Chokepoint Risk")
+
+        # Logic: High Risk if Oil is spiking or specific global events are flagged
+        hormuz_status = "CRITICAL" if oil_price > 95 else "ELEVATED"
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.error(f"**Strait of Hormuz:** {hormuz_status}")
+            st.caption("Status: Closure/Disruption. Affects 20% of global oil/LNG.")
+        with c2:
+            st.warning("**Suez Canal:** STABLE")
+            st.caption("Status: Normal transit. Monitor for regional escalation.")
+        with c3:
+            st.success("**Malacca Strait:** CLEAR")
+            st.caption("Status: Normal traffic flow.")
+
+        # --- THE 'RECESSION RISK' ALERT ---
+        if oil_price > 100:
+            st.markdown(f"""
+            <div style="background-color: #7f1d1d; padding: 20px; border-radius: 10px; border: 2px solid #f87171;">
+                <h3 style="color: white; margin-top: 0;">🚨 RECESSION RISK ALERT: OIL > $100</h3>
+                <p style="color: #fca5a5;">Oil is currently at <b>${oil_price:.2f}</b>. Historically, sustained prices over $100 act as a massive tax on consumers,
+                drastically reducing discretionary spending.</p>
+                <hr style="border-color: #f87171;">
+                <p><b>Impact on Consumer Cyclicals:</b> Expect significant margin contraction and lower demand for non-essential goods/services.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # --- PAGE 5: Company Profile ---
     elif page == "Company Profile & Roadmap":
         st.markdown(f"<div class='fun-header'>🏢 Profile: {info.get('longName', ticker_symbol)}</div>", unsafe_allow_html=True)
         
