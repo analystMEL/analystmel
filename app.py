@@ -460,34 +460,25 @@ def classify_cash_position(stock):
     except:
         return "Unknown", None, 0
 
-def fetch_macro_context():
+def fetch_macro_indicators():
     """
-    Fetches 60 days of historical data for key global macro indicators
-    and returns both the latest prices and the historical DataFrame.
+    Fetches key global macro indicators to assess market 'weather'.
     """
-    tickers = {
+    macro_tickers = {
         "Crude Oil (WTI)": "CL=F",
         "Gold": "GC=F",
         "Copper": "HG=F",
-        "10Y Treasury Yield": "^TNX",
-        "S&P 500": "^GSPC"
+        "10Y Treasury Yield": "^TNX"
     }
-    try:
-        data = yf.download(list(tickers.values()), period="60d")['Close']
-        inv_map = {v: k for k, v in tickers.items()}
-        data = data.rename(columns=inv_map)
-
-        # Latest prices for the ticker tape
-        latest_data = {}
-        for name in tickers.keys():
-            if name in data.columns:
-                latest_data[name] = data[name].dropna().iloc[-1] if not data[name].dropna().empty else None
-            else:
-                latest_data[name] = None
-
-        return latest_data, data
-    except Exception:
-        return {}, pd.DataFrame()
+    macro_data = {}
+    for name, ticker in macro_tickers.items():
+        try:
+            data = yf.Ticker(ticker).history(period="1d")
+            if not data.empty:
+                macro_data[name] = data['Close'].iloc[-1]
+        except:
+            macro_data[name] = None
+    return macro_data
 
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
@@ -1633,61 +1624,17 @@ def main_dashboard():
 
     # --- PAGE 4: Macro Stress Test ---
     elif page == "Macro Stress Test":
-        st.markdown('<div class="fun-header">🌍 Macro Stress Test & Geopolitics</div>', unsafe_allow_html=True)
+        st.markdown('<div class="fun-header">🌍 Macro Stress Test</div>', unsafe_allow_html=True)
 
-        macro_stats, hist_macro = fetch_macro_context()
+        macro_stats = fetch_macro_indicators()
         oil_price = macro_stats.get("Crude Oil (WTI)", 0)
-        if oil_price is None:
-            oil_price = 0
-
-        # Extract only the 4 main assets for the ticker tape to avoid overcrowding
-        ticker_items = {k: v for k, v in macro_stats.items() if k != "S&P 500"}
 
         # --- GLOBAL COMMODITY TICKER TAPE ---
-        cols = st.columns(len(ticker_items))
-        for i, (name, val) in enumerate(ticker_items.items()):
-            if val is not None:
-                cols[i].metric(name, f"${val:.2f}" if name != "10Y Treasury Yield" else f"{val:.2f}%")
-            else:
-                cols[i].metric(name, "N/A")
+        cols = st.columns(len(macro_stats))
+        for i, (name, val) in enumerate(macro_stats.items()):
+            cols[i].metric(name, f"${val:.2f}" if name != "10Y Treasury Yield" else f"{val:.2f}%")
 
         st.markdown("---")
-
-        if not hist_macro.empty:
-            # --- SECTION: PRICING PATTERNS ---
-            st.subheader("📊 Commodities Pricing Patterns (Last 2 Months)")
-
-            # Normalize data to a 100-base for visual comparison
-            norm_data = (hist_macro / hist_macro.iloc[0]) * 100
-            st.line_chart(norm_data)
-            st.caption("Data normalized to 100. Shows relative growth/decline of Assets vs. S&P 500.")
-
-            st.markdown("---")
-
-            # --- SECTION: CORRELATION ANALYSIS ---
-            st.subheader("🔗 S&P 500 Correlation Analysis")
-
-            corr_matrix = hist_macro.corr()
-
-            col_corr, col_insight = st.columns([1, 1.5])
-
-            with col_corr:
-                st.write("**Correlation Matrix**")
-                st.dataframe(corr_matrix.style.background_gradient(cmap='RdYlGn', axis=None))
-
-            with col_insight:
-                st.write("**Valoura Strategic Insight**")
-                if "Crude Oil (WTI)" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
-                    oil_spx_corr = corr_matrix.loc["Crude Oil (WTI)", "S&P 500"]
-                    if not pd.isna(oil_spx_corr) and oil_spx_corr < -0.3:
-                        st.error(f"⚠️ **Inverse Oil Correlation ({oil_spx_corr:.2f}):** Oil is rising while the S&P 500 falls. This suggests that energy supply shocks (like the Hormuz closure) are actively devaluing equities.")
-
-                if "Gold" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
-                    gold_spx_corr = corr_matrix.loc["Gold", "S&P 500"]
-                    if not pd.isna(gold_spx_corr) and gold_spx_corr < 0:
-                        st.success(f"🛡️ **Safe Haven Confirmation:** Gold is negatively correlated with stocks ({gold_spx_corr:.2f}). Gold is effectively acting as a hedge during this period of instability.")
-
-            st.markdown("---")
 
         # --- CHOKEPOINT RISK STATUS (Geopolitical Overlay) ---
         st.subheader("🚩 Geopolitical Chokepoint Risk")
