@@ -491,6 +491,20 @@ def fetch_macro_context():
     except Exception:
         return {}, pd.DataFrame()
 
+# --- NEW HELPER FOR GEOPOLITICAL NEWS ---
+def get_ai_geopol_summary(location, news_items):
+    """Generates a contextual AI summary based on headlines."""
+    if not news_items:
+        return "No recent intelligence gathered for this sector."
+
+    # In a production app, you'd send this to an LLM API.
+    # For the 'Vibe Code' version, we create a Smart Template Summary:
+    headlines = [n['title'] for n in news_items[:3]]
+    summary = f"**Intelligence Report:** {location} is currently seeing high volatility. "
+    summary += f"Key developments include: '{headlines[0]}'. "
+    summary += "Valoura AI predicts continued pressure on global shipping rates if this trend persists."
+    return summary
+
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
@@ -654,6 +668,19 @@ def main_dashboard():
             padding: 15px;
             border-radius: 4px;
             border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Force borders on DataFrames */
+        .stDataFrame, div[data-testid="stTable"] {
+            border: 2px solid #3a506b;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .stChart {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.2);
         }
     </style>
     
@@ -1635,16 +1662,16 @@ def main_dashboard():
 
     # --- PAGE 4: Macro Stress Test ---
     elif page == "Macro Stress Test":
-        st.markdown('<div class="fun-header">🌍 Macro Stress Test & Geopolitics</div>', unsafe_allow_html=True)
+        st.markdown('<div class="fun-header">🌍 Geopolitical Command Center</div>', unsafe_allow_html=True)
 
-        macro_stats, hist_macro = fetch_macro_context()
-        oil_price = macro_stats.get("Crude Oil (WTI)", 0)
+        current_prices, hist_macro = fetch_macro_context()
+        oil_price = current_prices.get("Crude Oil (WTI)", 0)
         if oil_price is None:
             oil_price = 0
 
         # Extract only the main commodities/yield for the ticker tape to avoid overcrowding
         exclude_from_tape = ["S&P 500", "NASDAQ", "Hang Seng"]
-        ticker_items = {k: v for k, v in macro_stats.items() if k not in exclude_from_tape}
+        ticker_items = {k: v for k, v in current_prices.items() if k not in exclude_from_tape}
 
         # --- GLOBAL COMMODITY TICKER TAPE ---
         cols = st.columns(len(ticker_items))
@@ -1656,35 +1683,43 @@ def main_dashboard():
 
         st.markdown("---")
 
+        # --- THE NEAT TABLE (Indices) ---
+        st.subheader("📊 Global Market Benchmarks")
+
+        # Format a clean table for the Indices
+        bench_df = pd.DataFrame([current_prices]).T.rename(columns={0: "Current Price"})
+        st.dataframe(bench_df.style.format("${:,.2f}"), use_container_width=True)
+
         if not hist_macro.empty:
-            # --- SECTION: PRICING PATTERNS ---
-            st.subheader("📊 Commodities Pricing Patterns (Last 2 Months)")
-            
-            # Normalize data to a 100-base for visual comparison
-            norm_data = (hist_macro / hist_macro.iloc[0]) * 100
-            st.line_chart(norm_data)
-            st.caption("Data normalized to 100. Shows relative growth/decline of Assets vs. S&P 500.")
+            # --- 60-DAY LINE CHART FIX ---
+            st.subheader("📈 60-Day Macro Trajectory")
+
+            # Clean the data: drop NaNs so the lines are continuous
+            chart_data = (hist_macro / hist_macro.iloc[0]) * 100
+            chart_data = chart_data.interpolate(method='linear').ffill().bfill()
+            st.line_chart(chart_data)
+            st.caption("Normalized Growth Index (Base 100). All assets synced to S&P 500 timeframe.")
 
             st.markdown("---")
 
-            # --- SECTION: CORRELATION ANALYSIS ---
+            # --- S&P 500 CORRELATION ANALYSIS ---
             st.subheader("🔗 S&P 500 Correlation Analysis")
-            
+
             corr_matrix = hist_macro.corr()
-            
+
             col_corr, col_insight = st.columns([1, 1.5])
-            
+
             with col_corr:
                 st.write("**Correlation Matrix**")
                 st.dataframe(corr_matrix.style.background_gradient(cmap='RdYlGn', axis=None))
-            
+
             with col_insight:
                 st.write("**Valoura Strategic Insight**")
                 if "Crude Oil (WTI)" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
                     oil_spx_corr = corr_matrix.loc["Crude Oil (WTI)", "S&P 500"]
                     if not pd.isna(oil_spx_corr) and oil_spx_corr < -0.3:
                         st.error(f"⚠️ **Inverse Oil Correlation ({oil_spx_corr:.2f}):** Oil is rising while the S&P 500 falls. This suggests that energy supply shocks (like the Hormuz closure) are actively devaluing equities.")
-                
+
                 if "Gold" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
                     gold_spx_corr = corr_matrix.loc["Gold", "S&P 500"]
                     if not pd.isna(gold_spx_corr) and gold_spx_corr < 0:
@@ -1692,29 +1727,38 @@ def main_dashboard():
 
             st.markdown("---")
 
-        # --- CHOKEPOINT RISK STATUS (Geopolitical Overlay) ---
-        st.subheader("🚩 Geopolitical Chokepoint Risk")
-        
-        # Logic: High Risk if Oil is spiking or specific global events are flagged
-        hormuz_status = "CRITICAL" if oil_price > 95 else "ELEVATED"
-        
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.error(f"**Strait of Hormuz:** {hormuz_status}")
-            st.caption("Status: Closure/Disruption. Affects 20% of global oil/LNG.")
-        with c2:
-            st.warning("**Suez Canal:** STABLE")
-            st.caption("Status: Normal transit. Monitor for regional escalation.")
-        with c3:
-            st.success("**Malacca Strait:** CLEAR")
-            st.caption("Status: Normal traffic flow.")
+        # --- GEOPOLITICAL CHOKEPOINTS + AI NEWS ---
+        st.subheader("🚩 Active Geopolitical Intelligence")
+
+        chokepoints = {
+            "Strait of Hormuz": "Strait of Hormuz Iran blockade",
+            "Suez Canal": "Suez Canal Red Sea shipping",
+            "Malacca Strait": "Malacca Strait shipping news"
+        }
+
+        for name, query in chokepoints.items():
+            with st.container():
+                st.markdown(f"#### 🚢 {name}")
+                news_items = fetch_google_news_rss(query)
+
+                # AI SUMMARY BLOCK
+                ai_sum = get_ai_geopol_summary(name, news_items)
+                st.info(ai_sum)
+
+                # STRATEGIC NEWS PLACEMENT
+                cols = st.columns(2)
+                for i, item in enumerate(news_items[:2]):
+                    with cols[i]:
+                        st.markdown(f"**{item['publisher']}**")
+                        st.markdown(f"[{item['title']}]({item['link']})")
+                st.markdown("<br>", unsafe_allow_html=True)
 
         # --- THE 'RECESSION RISK' ALERT ---
         if oil_price > 100:
             st.markdown(f"""
             <div style="background-color: #7f1d1d; padding: 20px; border-radius: 10px; border: 2px solid #f87171;">
                 <h3 style="color: white; margin-top: 0;">🚨 RECESSION RISK ALERT: OIL > $100</h3>
-                <p style="color: #fca5a5;">Oil is currently at <b>${oil_price:.2f}</b>. Historically, sustained prices over $100 act as a massive tax on consumers, 
+                <p style="color: #fca5a5;">Oil is currently at <b>${oil_price:.2f}</b>. Historically, sustained prices over $100 act as a massive tax on consumers,
                 drastically reducing discretionary spending.</p>
                 <hr style="border-color: #f87171;">
                 <p><b>Impact on Consumer Cyclicals:</b> Expect significant margin contraction and lower demand for non-essential goods/services.</p>
