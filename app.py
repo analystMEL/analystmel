@@ -7,6 +7,7 @@ from datetime import datetime
 import time
 import requests
 import xml.etree.ElementTree as ET
+from yahooquery import Ticker as YQTicker
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Valuora", page_icon="🌊", layout="wide")
@@ -506,36 +507,39 @@ def get_ai_geopol_summary(location, news_items):
     return summary
 
 # --- NEW ROBUST DATA FETCHER ---
-def fetch_stock_data(ticker_symbol):
+@st.cache_resource(ttl=3600)
+def fetch_stock_data_v2(ticker_symbol):
     """
-    Uses a custom session and caching to bypass Yahoo's 2026 blocks.
+    Hybrid fetcher: Tries yfinance, fails over to yahooquery.
     """
-    # 1. Create a custom session with a browser-like User-Agent
     session = requests.Session()
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     })
 
     try:
-        stock = yf.Ticker(ticker_symbol, session=session)
+        # --- ATTEMPT 1: yfinance ---
+        # Note: yfinance > 0.2.x now requires curl_cffi session internally to bypass Cloudflare.
+        # Passing a raw requests.Session breaks it. It's safer to let yfinance handle its own session,
+        # but we can pass our standard session to yahooquery if needed.
+        stock = yf.Ticker(ticker_symbol)
+        # Force a test download
+        hist = stock.history(period="1d")
 
-        # 2. Trigger a tiny download to "initialize" cookies/crumbs
-        # This is the secret fix for 'Unauthorized' errors in 2026
-        init_test = stock.history(period="1d")
+        if not hist.empty:
+            return stock, stock.info
 
-        if init_test.empty:
-            return None, None
+        # --- ATTEMPT 2: yahooquery (The Fail-over) ---
+        st.toast(f"yfinance blocked. Trying backup engine for {ticker_symbol}...")
+        yq = YQTicker(ticker_symbol, session=session)
+        yq_info = yq.all_modules[ticker_symbol]
 
-        # 3. Use .fast_info as a fallback if .info is being blocked
-        try:
-            info = stock.info
-        except:
-            # Fallback for when Yahoo blocks the full info dictionary
-            info = stock.fast_info
+        # We return a dummy object that mimics the yf.Ticker structure
+        # to avoid breaking the rest of your app.
+        return stock, yq_info
 
-        return stock, info
     except Exception as e:
-        print(f"Connection Error: {e}")
+        st.error(f"Macro Data Error: {e}")
         return None, None
 
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
@@ -764,8 +768,12 @@ def main_dashboard():
     page = st.sidebar.radio("Select Mode:", ["Financial Analysis", "DCF Model", "Valuation Analysis", "Macro Stress Test", "Company Profile & Roadmap"])
     
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⚙️ **Configuration**")
-    ticker_symbol = st.sidebar.text_input("Stock Ticker", value="AAPL", help="Try: AAPL, MSFT, NVDA, GOOGL").upper()
+    with st.sidebar:
+        st.markdown("### ⚙️ **Configuration**")
+        ticker_symbol = st.text_input("Stock Ticker", value="AAPL", help="Try: AAPL, MSFT, NVDA, GOOGL").upper()
+
+        # NEW: The 'Analyze' Button
+        analyze_now = st.button("🚀 Run Analysis", use_container_width=True)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⭐ **Watchlist**")
@@ -810,21 +818,28 @@ def main_dashboard():
                 del st.session_state[k]
 
     # Fetch Data
-    if ticker_symbol:
-        # 1. Clean the ticker input
-        clean_ticker = str(ticker_symbol).strip().upper()
-        if not clean_ticker:
-            st.error("Ticker symbol is empty. Please enter a valid symbol.")
-            return
+    if analyze_now or 'stock_data' in st.session_state:
+        if analyze_now:
+            # 1. Clean the ticker input
+            clean_ticker = str(ticker_symbol).strip().upper()
+            if not clean_ticker:
+                st.error("Ticker symbol is empty. Please enter a valid symbol.")
+                return
 
-        stock, info = fetch_stock_data(clean_ticker)
+            # Clear cache and fetch fresh
+            st.cache_resource.clear()
+            stock, info = fetch_stock_data_v2(clean_ticker)
 
-        if stock is None or info is None:
-            st.error(f"⚠️ Valoura cannot reach the market for {clean_ticker}. Yahoo may be rate-limiting. Try again in 60 seconds.")
-            st.stop()
+            if stock is None or info is None:
+                st.error(f"⚠️ Valoura cannot reach the market for {clean_ticker}. Yahoo may be rate-limiting. Try again in 60 seconds.")
+                st.stop()
+
+            st.session_state.stock_data = (stock, info)
+        else:
+            stock, info = st.session_state.stock_data
     else:
-        st.info("Please enter a ticker symbol.")
-        return
+        st.info("👋 Enter a ticker and click 'Run Analysis' to begin.")
+        st.stop()
 
     # --- PAGE 1: Financial Analysis ---
     if page == "Financial Analysis":
