@@ -462,7 +462,7 @@ def classify_cash_position(stock):
 
 def fetch_macro_context():
     """
-    Fetches 60 days of historical data for key global macro indicators 
+    Fetches 60 days of historical data for key global macro indicators
     and returns both the latest prices and the historical DataFrame.
     """
     tickers = {
@@ -470,13 +470,15 @@ def fetch_macro_context():
         "Gold": "GC=F",
         "Copper": "HG=F",
         "10Y Treasury Yield": "^TNX",
-        "S&P 500": "^GSPC"
+        "S&P 500": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "Hang Seng": "^HSI"
     }
     try:
         data = yf.download(list(tickers.values()), period="60d")['Close']
         inv_map = {v: k for k, v in tickers.items()}
         data = data.rename(columns=inv_map)
-        
+
         # Latest prices for the ticker tape
         latest_data = {}
         for name in tickers.keys():
@@ -484,7 +486,7 @@ def fetch_macro_context():
                 latest_data[name] = data[name].dropna().iloc[-1] if not data[name].dropna().empty else None
             else:
                 latest_data[name] = None
-                
+
         return latest_data, data
     except Exception:
         return {}, pd.DataFrame()
@@ -1634,15 +1636,16 @@ def main_dashboard():
     # --- PAGE 4: Macro Stress Test ---
     elif page == "Macro Stress Test":
         st.markdown('<div class="fun-header">🌍 Macro Stress Test & Geopolitics</div>', unsafe_allow_html=True)
-        
+
         macro_stats, hist_macro = fetch_macro_context()
         oil_price = macro_stats.get("Crude Oil (WTI)", 0)
-        if oil_price is None: 
+        if oil_price is None:
             oil_price = 0
-            
-        # Extract only the 4 main assets for the ticker tape to avoid overcrowding
-        ticker_items = {k: v for k, v in macro_stats.items() if k != "S&P 500"}
-        
+
+        # Extract only the main commodities/yield for the ticker tape to avoid overcrowding
+        exclude_from_tape = ["S&P 500", "NASDAQ", "Hang Seng"]
+        ticker_items = {k: v for k, v in macro_stats.items() if k not in exclude_from_tape}
+
         # --- GLOBAL COMMODITY TICKER TAPE ---
         cols = st.columns(len(ticker_items))
         for i, (name, val) in enumerate(ticker_items.items()):
