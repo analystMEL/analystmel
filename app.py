@@ -1659,7 +1659,7 @@ def main_dashboard():
         if not hist_macro.empty:
             # --- SECTION: PRICING PATTERNS ---
             st.subheader("📊 Commodities Pricing Patterns (Last 2 Months)")
-
+            
             # Normalize data to a 100-base for visual comparison
             norm_data = (hist_macro / hist_macro.iloc[0]) * 100
             st.line_chart(norm_data)
@@ -1669,22 +1669,22 @@ def main_dashboard():
 
             # --- SECTION: CORRELATION ANALYSIS ---
             st.subheader("🔗 S&P 500 Correlation Analysis")
-
+            
             corr_matrix = hist_macro.corr()
-
+            
             col_corr, col_insight = st.columns([1, 1.5])
-
+            
             with col_corr:
                 st.write("**Correlation Matrix**")
                 st.dataframe(corr_matrix.style.background_gradient(cmap='RdYlGn', axis=None))
-
+            
             with col_insight:
                 st.write("**Valoura Strategic Insight**")
                 if "Crude Oil (WTI)" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
                     oil_spx_corr = corr_matrix.loc["Crude Oil (WTI)", "S&P 500"]
                     if not pd.isna(oil_spx_corr) and oil_spx_corr < -0.3:
                         st.error(f"⚠️ **Inverse Oil Correlation ({oil_spx_corr:.2f}):** Oil is rising while the S&P 500 falls. This suggests that energy supply shocks (like the Hormuz closure) are actively devaluing equities.")
-
+                
                 if "Gold" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
                     gold_spx_corr = corr_matrix.loc["Gold", "S&P 500"]
                     if not pd.isna(gold_spx_corr) and gold_spx_corr < 0:
@@ -1694,10 +1694,10 @@ def main_dashboard():
 
         # --- CHOKEPOINT RISK STATUS (Geopolitical Overlay) ---
         st.subheader("🚩 Geopolitical Chokepoint Risk")
-
+        
         # Logic: High Risk if Oil is spiking or specific global events are flagged
         hormuz_status = "CRITICAL" if oil_price > 95 else "ELEVATED"
-
+        
         c1, c2, c3 = st.columns(3)
         with c1:
             st.error(f"**Strait of Hormuz:** {hormuz_status}")
@@ -1714,7 +1714,7 @@ def main_dashboard():
             st.markdown(f"""
             <div style="background-color: #7f1d1d; padding: 20px; border-radius: 10px; border: 2px solid #f87171;">
                 <h3 style="color: white; margin-top: 0;">🚨 RECESSION RISK ALERT: OIL > $100</h3>
-                <p style="color: #fca5a5;">Oil is currently at <b>${oil_price:.2f}</b>. Historically, sustained prices over $100 act as a massive tax on consumers,
+                <p style="color: #fca5a5;">Oil is currently at <b>${oil_price:.2f}</b>. Historically, sustained prices over $100 act as a massive tax on consumers, 
                 drastically reducing discretionary spending.</p>
                 <hr style="border-color: #f87171;">
                 <p><b>Impact on Consumer Cyclicals:</b> Expect significant margin contraction and lower demand for non-essential goods/services.</p>
