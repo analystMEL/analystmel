@@ -1,5 +1,6 @@
 streamlit
 yfinance>=0.2.62
+yahooquery
 pandas
 numpy
 plotly
