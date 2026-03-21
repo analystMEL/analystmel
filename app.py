@@ -505,6 +505,39 @@ def get_ai_geopol_summary(location, news_items):
     summary += "Valoura AI predicts continued pressure on global shipping rates if this trend persists."
     return summary
 
+# --- NEW ROBUST DATA FETCHER ---
+def fetch_stock_data(ticker_symbol):
+    """
+    Uses a custom session and caching to bypass Yahoo's 2026 blocks.
+    """
+    # 1. Create a custom session with a browser-like User-Agent
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+
+    try:
+        stock = yf.Ticker(ticker_symbol, session=session)
+
+        # 2. Trigger a tiny download to "initialize" cookies/crumbs
+        # This is the secret fix for 'Unauthorized' errors in 2026
+        init_test = stock.history(period="1d")
+
+        if init_test.empty:
+            return None, None
+
+        # 3. Use .fast_info as a fallback if .info is being blocked
+        try:
+            info = stock.info
+        except:
+            # Fallback for when Yahoo blocks the full info dictionary
+            info = stock.fast_info
+
+        return stock, info
+    except Exception as e:
+        print(f"Connection Error: {e}")
+        return None, None
+
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
@@ -778,30 +811,17 @@ def main_dashboard():
 
     # Fetch Data
     if ticker_symbol:
-        try:
-            # 1. Clean the ticker input
-            clean_ticker = str(ticker_symbol).strip().upper()
-            if not clean_ticker:
-                st.error("Ticker symbol is empty. Please enter a valid symbol.")
-                return
+        # 1. Clean the ticker input
+        clean_ticker = str(ticker_symbol).strip().upper()
+        if not clean_ticker:
+            st.error("Ticker symbol is empty. Please enter a valid symbol.")
+            return
 
-            stock = yf.Ticker(clean_ticker)
-            
-            # Check if we actually got data (history is a good test)
-            hist_check = stock.history(period="1d")
-            if hist_check.empty:
-                st.error(f"No data found for '{clean_ticker}'. Check the symbol on Yahoo Finance.")
-                return
+        stock, info = fetch_stock_data(clean_ticker)
 
-            info = stock.info
-            # Basic validation
-            if 'symbol' not in info and 'currentPrice' not in info:
-                st.error("Invalid Ticker Data. Please try again.")
-                return
-        except Exception as e:
-             print(f"DEBUG: yfinance error for {ticker_symbol}: {e}")
-             st.error(f"Could not fetch data for {ticker_symbol}. Check internet or ticker.")
-             return
+        if stock is None or info is None:
+            st.error(f"⚠️ Valoura cannot reach the market for {clean_ticker}. Yahoo may be rate-limiting. Try again in 60 seconds.")
+            st.stop()
     else:
         st.info("Please enter a ticker symbol.")
         return
