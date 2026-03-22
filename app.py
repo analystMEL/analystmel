@@ -461,6 +461,62 @@ def classify_cash_position(stock):
     except:
         return "Unknown", None, 0
 
+# --- 1. THE ROBUST SECRET HELPER ---
+def get_av_key():
+    try:
+        return st.secrets["ALPHA_VANTAGE_KEY"]
+    except:
+        return None # Graceful fallback
+
+# --- 2. THE SYSTEM HEALTH TRAY (Place in Sidebar) ---
+def render_system_health():
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🛰️ **System Health**")
+
+    # Check Alpha Vantage
+    av_key = get_av_key()
+    if av_key:
+        av_status = st.session_state.get('av_status', "🟢 Online")
+    else:
+        av_status = "🟡 Demo Mode (No Key)"
+
+    yf_status = st.session_state.get('yf_status', "🟢 Online")
+
+    st.sidebar.write(f"**Alpha Vantage:** {av_status}")
+    st.sidebar.write(f"**Yahoo Finance:** {yf_status}")
+
+    if not av_key:
+        st.sidebar.warning("Add 'ALPHA_VANTAGE_KEY' to Streamlit Secrets for live macro data.")
+
+# --- 3. THE HYBRID FETCH LOGIC ---
+@st.cache_data(ttl=3600)
+def fetch_macro_command_center():
+    """
+    Hybrid: Current prices via Alpha Vantage (Stable),
+    History via yfinance (Deep).
+    """
+    av_key = get_av_key()
+    macro_data = {"oil": 92.50, "spx": 5100, "gold": 2150} # Default/Demo Values
+
+    # A. Current 'Heartbeat' via Alpha Vantage
+    if av_key:
+        try:
+            # Only hit Alpha for the most critical triggers
+            oil_url = f'https://www.alphavantage.co/query?function=WTI&interval=daily&apikey={av_key}'
+            r = requests.get(oil_url).json()
+            macro_data["oil"] = float(r['data'][0]['value'])
+            st.session_state.av_status = "🟢 Online"
+        except:
+            st.session_state.av_status = "🔴 Rate Limited"
+
+    # B. Historical Patterns via yfinance
+    current_prices, hist_macro = fetch_macro_context() # Your existing function
+
+    # Overwrite Yahoo's Oil/SPX with Alpha's 'Clean' data if available
+    current_prices["Crude Oil (WTI)"] = macro_data["oil"]
+
+    return current_prices, hist_macro
+
 def fetch_macro_context():
     """
     Fetches 60 days of historical data for key global macro indicators
@@ -794,6 +850,9 @@ def main_dashboard():
         pass # Removed DCF Settings from here
     
     st.sidebar.info("💡 **Tip:** Try TSLA, NVDA, or MSFT for interesting results!")
+
+    # Render System Health Tray
+    render_system_health()
 
     # --- Ticker Persistence & Reset Logic ---
     # If ticker changes, reset DCF inputs so they can be re-fetched
@@ -1699,7 +1758,7 @@ def main_dashboard():
     elif page == "Macro Stress Test":
         st.markdown('<div class="fun-header">🌍 Geopolitical Command Center</div>', unsafe_allow_html=True)
 
-        current_prices, hist_macro = fetch_macro_context()
+        current_prices, hist_macro = fetch_macro_command_center()
         oil_price = current_prices.get("Crude Oil (WTI)", 0)
         if oil_price is None:
             oil_price = 0
