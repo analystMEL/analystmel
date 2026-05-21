@@ -1,9 +1,9 @@
-streamlit
+streamlit>=1.35.0
 yfinance>=0.2.62
-yahooquery
-alpha_vantage
-pandas
-numpy
-plotly
-requests
-matplotlib
+yahooquery>=2.3.0
+alpha_vantage>=2.3.1
+pandas>=2.0.0
+numpy>=1.26.0
+plotly>=5.20.0
+requests>=2.31.0
+matplotlib>=3.8.0
