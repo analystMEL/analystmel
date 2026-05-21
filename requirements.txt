@@ -2,6 +2,7 @@ streamlit>=1.35.0
 yfinance>=0.2.62
 yahooquery>=2.3.0
 alpha_vantage>=2.3.1
+curl_cffi>=0.7.0
 pandas>=2.0.0
 numpy>=1.26.0
 plotly>=5.20.0

@@ -594,41 +594,161 @@ def get_ai_geopol_summary(location, news_items):
     summary += "Valoura AI predicts continued pressure on global shipping rates if this trend persists."
     return summary
 
-# --- NEW ROBUST DATA FETCHER ---
+# --- ALPHA VANTAGE FALLBACK (for cloud deployments where Yahoo IP-blocks) ---
+class _AVStockProxy:
+    """Mimics yf.Ticker — exposes .info, .history(), .news for downstream code."""
+    def __init__(self, ticker, info_dict, hist_df):
+        self.ticker = ticker
+        self.info   = info_dict
+        self._hist  = hist_df
+        self.news   = []
+
+    def history(self, period="1y", interval="1d", **kwargs):
+        if self._hist is None or self._hist.empty:
+            return self._hist
+        if period in (None, "max"):
+            return self._hist
+        days_map = {
+            "1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180,
+            "1y": 365, "2y": 730, "5y": 1825, "10y": 3650, "ytd": 365,
+        }
+        days = days_map.get(period, 365)
+        from datetime import timedelta
+        cutoff = self._hist.index.max() - timedelta(days=days)
+        return self._hist[self._hist.index >= cutoff]
+
+
+def _fetch_av_stock(ticker_symbol):
+    """Build a yf-compatible (stock, info) tuple from Alpha Vantage OVERVIEW + TIME_SERIES_DAILY."""
+    av_key = get_av_key()
+    if not av_key:
+        return None, None
+
+    def _safe_f(v):
+        try:
+            if v in (None, "None", "-", "", "NaN"):
+                return None
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    try:
+        # OVERVIEW → fundamentals + descriptive
+        ov_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker_symbol}&apikey={av_key}"
+        ov = requests.get(ov_url, timeout=15).json()
+        if not isinstance(ov, dict) or "Symbol" not in ov:
+            note = ov.get("Information") or ov.get("Note") or "unknown ticker / rate limit" if isinstance(ov, dict) else "bad response"
+            st.warning(f"Alpha Vantage OVERVIEW failed for {ticker_symbol}: {str(note)[:140]}")
+            return None, None
+
+        # TIME_SERIES_DAILY → price history
+        ts_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker_symbol}&outputsize=full&apikey={av_key}"
+        ts_data = requests.get(ts_url, timeout=15).json()
+        ts_series = ts_data.get("Time Series (Daily)", {}) if isinstance(ts_data, dict) else {}
+
+        if ts_series:
+            df = pd.DataFrame.from_dict(ts_series, orient="index")
+            df.columns = ["Open", "High", "Low", "Close", "Volume"]
+            df = df.astype(float)
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
+            df["Adj Close"] = df["Close"]
+        else:
+            df = pd.DataFrame()
+
+        info = {
+            "symbol":                ov.get("Symbol"),
+            "shortName":             ov.get("Name"),
+            "longName":              ov.get("Name"),
+            "longBusinessSummary":   ov.get("Description") or "",
+            "sector":                ov.get("Sector"),
+            "industry":              ov.get("Industry"),
+            "country":               ov.get("Country"),
+            "city":                  ov.get("Address"),
+            "website":               ov.get("OfficialSite"),
+            "currency":              ov.get("Currency"),
+            "exchange":              ov.get("Exchange"),
+            "marketCap":             _safe_f(ov.get("MarketCapitalization")),
+            "enterpriseValue":       None,
+            "trailingPE":            _safe_f(ov.get("PERatio")),
+            "forwardPE":             _safe_f(ov.get("ForwardPE")),
+            "pegRatio":              _safe_f(ov.get("PEGRatio")),
+            "priceToBook":           _safe_f(ov.get("PriceToBookRatio")),
+            "priceToSalesTrailing12Months": _safe_f(ov.get("PriceToSalesRatioTTM")),
+            "beta":                  _safe_f(ov.get("Beta")),
+            "sharesOutstanding":     _safe_f(ov.get("SharesOutstanding")),
+            "dividendYield":         _safe_f(ov.get("DividendYield")),
+            "dividendRate":          _safe_f(ov.get("DividendPerShare")),
+            "fiftyTwoWeekHigh":      _safe_f(ov.get("52WeekHigh")),
+            "fiftyTwoWeekLow":       _safe_f(ov.get("52WeekLow")),
+            "fiftyDayAverage":       _safe_f(ov.get("50DayMovingAverage")),
+            "twoHundredDayAverage":  _safe_f(ov.get("200DayMovingAverage")),
+            "targetMeanPrice":       _safe_f(ov.get("AnalystTargetPrice")),
+            "ebitda":                _safe_f(ov.get("EBITDA")),
+            "profitMargins":         _safe_f(ov.get("ProfitMargin")),
+            "operatingMargins":      _safe_f(ov.get("OperatingMarginTTM")),
+            "returnOnAssets":        _safe_f(ov.get("ReturnOnAssetsTTM")),
+            "returnOnEquity":        _safe_f(ov.get("ReturnOnEquityTTM")),
+            "trailingEps":           _safe_f(ov.get("EPS")),
+            "revenuePerShare":       _safe_f(ov.get("RevenuePerShareTTM")),
+            "regularMarketPrice":    float(df["Close"].iloc[-1]) if not df.empty else None,
+            "previousClose":         float(df["Close"].iloc[-2]) if len(df) >= 2 else None,
+            "fullTimeEmployees":     int(_safe_f(ov.get("FullTimeEmployees"))) if _safe_f(ov.get("FullTimeEmployees")) else None,
+            "_data_source":          "alpha_vantage",
+        }
+
+        stock = _AVStockProxy(ticker_symbol, info, df)
+        return stock, info
+
+    except Exception as e:
+        st.warning(f"Alpha Vantage fallback exception for {ticker_symbol}: {e}")
+        return None, None
+
+
+# --- ROBUST 3-TIER DATA FETCHER (yfinance → yahooquery → Alpha Vantage) ---
 @st.cache_resource(ttl=3600)
 def fetch_stock_data_v2(ticker_symbol):
     """
-    Hybrid fetcher: Tries yfinance, fails over to yahooquery.
+    3-tier hybrid:
+      1. yfinance (best on residential IPs)
+      2. yahooquery (different endpoints — sometimes survives Yahoo throttle)
+      3. Alpha Vantage (always works on cloud IPs — requires ALPHA_VANTAGE_KEY secret)
     """
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     })
 
+    # --- ATTEMPT 1: yfinance ---
     try:
-        # --- ATTEMPT 1: yfinance ---
-        # Note: yfinance > 0.2.x now requires curl_cffi session internally to bypass Cloudflare.
-        # Passing a raw requests.Session breaks it. It's safer to let yfinance handle its own session,
-        # but we can pass our standard session to yahooquery if needed.
         stock = yf.Ticker(ticker_symbol)
-        # Force a test download
-        hist = stock.history(period="1d")
-
-        if not hist.empty:
+        hist  = stock.history(period="1d")
+        if not hist.empty and stock.info and stock.info.get("symbol"):
+            st.session_state['yf_status'] = "🟢 Online"
             return stock, stock.info
+    except Exception:
+        pass
 
-        # --- ATTEMPT 2: yahooquery (The Fail-over) ---
-        st.toast(f"yfinance blocked. Trying backup engine for {ticker_symbol}...")
-        yq = YQTicker(ticker_symbol, session=session)
-        yq_info = yq.all_modules[ticker_symbol]
+    # --- ATTEMPT 2: yahooquery ---
+    try:
+        st.toast(f"yfinance blocked — trying yahooquery for {ticker_symbol}...")
+        yq      = YQTicker(ticker_symbol, session=session)
+        modules = yq.all_modules
+        if isinstance(modules, dict) and ticker_symbol in modules and isinstance(modules[ticker_symbol], dict):
+            st.session_state['yf_status'] = "🟡 yahooquery fallback"
+            return yf.Ticker(ticker_symbol), modules[ticker_symbol]
+    except Exception:
+        pass
 
-        # We return a dummy object that mimics the yf.Ticker structure
-        # to avoid breaking the rest of your app.
-        return stock, yq_info
+    # --- ATTEMPT 3: Alpha Vantage (cloud-friendly) ---
+    st.toast(f"Yahoo blocked — falling back to Alpha Vantage for {ticker_symbol}...")
+    av_stock, av_info = _fetch_av_stock(ticker_symbol)
+    if av_stock is not None and av_info is not None:
+        st.session_state['yf_status'] = "🔵 Alpha Vantage"
+        return av_stock, av_info
 
-    except Exception as e:
-        st.error(f"Macro Data Error: {e}")
-        return None, None
+    st.session_state['yf_status'] = "🔴 All sources blocked"
+    return None, None
 
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
@@ -922,7 +1042,13 @@ def main_dashboard():
             stock, info = fetch_stock_data_v2(clean_ticker)
 
             if stock is None or info is None:
-                st.error(f"⚠️ Valoura cannot reach the market for {clean_ticker}. Yahoo may be rate-limiting. Try again in 60 seconds.")
+                st.error(
+                    f"⚠️ Valoura cannot reach any data source for **{clean_ticker}**.\n\n"
+                    f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
+                    f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
+                    f"Go to App Settings → Secrets and add:\n\n"
+                    f"```toml\nALPHA_VANTAGE_KEY = \"your_key_here\"\n```"
+                )
                 st.stop()
 
             st.session_state.stock_data = (stock, info)
