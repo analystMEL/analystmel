@@ -1,0 +1,9 @@
+streamlit
+yfinance>=0.2.62
+yahooquery
+alpha_vantage
+pandas
+numpy
+plotly
+requests
+matplotlib
