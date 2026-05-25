@@ -758,7 +758,7 @@ def main_dashboard():
     <style>
         /* --- Formal Font Stack --- */
         html, body, [class*="css"] {
-            font-family: 'Georgia', 'Times New Roman', serif;
+            font-family: 'Times New Roman', Times, serif;
         }
         
         /* --- Main App Background (Dark Navy) --- */
@@ -837,7 +837,7 @@ def main_dashboard():
             font-size: 3em;
             font-weight: 800;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-            font-family: 'Georgia', serif;
+            font-family: 'Times New Roman', Times, serif;
             margin-bottom: 20px;
             border-bottom: 2px solid #3a506b;
             padding-bottom: 10px;
@@ -869,7 +869,7 @@ def main_dashboard():
             border: 1px solid rgba(251,191,36,0.15);
         }
         .valoura-brand {
-            font-family: 'Georgia', serif;
+            font-family: 'Times New Roman', Times, serif;
             font-size: 2.3em;
             font-weight: 800;
             color: #ffffff;
@@ -883,45 +883,49 @@ def main_dashboard():
             font-style: italic;
             margin-bottom: 14px;
         }
-        .valoura-navrow {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 10px;
-        }
-        .valoura-nav-pill {
-            display: inline-block;
-            padding: 9px 20px;
-            border-radius: 999px;
-            text-decoration: none !important;
-            font-family: 'Georgia', serif;
-            font-weight: 600;
-            font-size: 0.92em;
-            border: 1px solid rgba(255,255,255,0.12);
-            transition: all 0.15s ease-in-out;
-        }
-        .valoura-nav-pill.inactive {
-            background: rgba(255,255,255,0.06);
+        /* --- Nav pills rendered as st.buttons (AJAX rerun, no full reload) --- */
+        /* Inactive (secondary) — translucent dim pill */
+        div[data-testid="stButton"] > button[kind="secondary"],
+        button[data-testid="stBaseButton-secondary"] {
+            background: rgba(255,255,255,0.06) !important;
             color: #cbd5e1 !important;
+            border: 1px solid rgba(255,255,255,0.14) !important;
+            border-radius: 999px !important;
+            font-family: 'Times New Roman', Times, serif !important;
+            font-weight: 600 !important;
+            font-size: 0.95em !important;
+            padding: 8px 18px !important;
+            transition: all 0.15s ease-in-out !important;
         }
-        .valoura-nav-pill.inactive:hover {
-            background: rgba(251,191,36,0.18);
+        div[data-testid="stButton"] > button[kind="secondary"]:hover,
+        button[data-testid="stBaseButton-secondary"]:hover {
+            background: rgba(251,191,36,0.18) !important;
             color: #fde68a !important;
-            border-color: rgba(251,191,36,0.4);
+            border-color: rgba(251,191,36,0.45) !important;
         }
-        .valoura-nav-pill.active {
-            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        /* Active (primary) — gold gradient pill */
+        div[data-testid="stButton"] > button[kind="primary"],
+        button[data-testid="stBaseButton-primary"] {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%) !important;
             color: #0f172a !important;
-            border-color: #fde68a;
-            box-shadow: 0 2px 10px rgba(251,191,36,0.45);
-            font-weight: 700;
+            border: 1px solid #fde68a !important;
+            border-radius: 999px !important;
+            font-family: 'Times New Roman', Times, serif !important;
+            font-weight: 700 !important;
+            font-size: 0.95em !important;
+            padding: 8px 18px !important;
+            box-shadow: 0 2px 12px rgba(251,191,36,0.5) !important;
+        }
+        div[data-testid="stButton"] > button[kind="primary"]:hover,
+        button[data-testid="stBaseButton-primary"]:hover {
+            background: linear-gradient(135deg, #fde68a 0%, #fbbf24 100%) !important;
+            color: #0f172a !important;
         }
         
         /* --- Headers --- */
         h1, h2, h3, h4, h5, h6 {
             color: #ffffff !important;
-            font-family: 'Georgia', serif;
+            font-family: 'Times New Roman', Times, serif;
             font-weight: 600;
         }
         
@@ -1045,8 +1049,6 @@ def main_dashboard():
     if 'dcf_cash' not in st.session_state: st.session_state.dcf_cash = 0.0
 
     # --- Horizontal Navigation (replaces sidebar) ---
-    import urllib.parse
-
     PAGES = [
         "Financial Analysis",
         "DCF Model",
@@ -1058,28 +1060,31 @@ def main_dashboard():
     if 'active_page' not in st.session_state:
         st.session_state.active_page = "Financial Analysis"
 
-    # Sync from query params (so URL ?page=... drives navigation on click)
-    qp_page = st.query_params.get("page")
-    if qp_page and qp_page in PAGES and qp_page != st.session_state.active_page:
-        st.session_state.active_page = qp_page
-
-    active = st.session_state.active_page
-
-    # Build nav HTML
-    pills_html = ""
-    for p in PAGES:
-        cls = "active" if p == active else "inactive"
-        href = f"?page={urllib.parse.quote(p)}"
-        pills_html += f'<a class="valoura-nav-pill {cls}" href="{href}" target="_self">{p}</a>'
-
+    # Header banner (visual only — no nav links inside)
     st.markdown(
         '<div class="valoura-topbar">'
         '<div class="valoura-brand">🌊 Valuora</div>'
         '<div class="valoura-tagline">Context-aware valuation engine</div>'
-        f'<div class="valoura-navrow">{pills_html}</div>'
         '</div>',
         unsafe_allow_html=True,
     )
+
+    # Nav pills as real st.buttons (AJAX rerun, no full-page reload).
+    # CSS in the main style block turns primary buttons into gold pills
+    # and secondary buttons into translucent pills.
+    _nav_cols = st.columns(len(PAGES))
+    for _i, _p in enumerate(PAGES):
+        with _nav_cols[_i]:
+            if st.button(
+                _p,
+                key=f"nav_btn_{_i}",
+                use_container_width=True,
+                type=("primary" if _p == st.session_state.active_page else "secondary"),
+            ):
+                st.session_state.active_page = _p
+                st.rerun()
+
+    active = st.session_state.active_page
 
     # --- Control Row: Ticker input + Run Analysis button ---
     ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 4])
