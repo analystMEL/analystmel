@@ -842,6 +842,81 @@ def main_dashboard():
             border-bottom: 2px solid #3a506b;
             padding-bottom: 10px;
         }
+
+        /* --- Hide sidebar entirely (replaced by horizontal nav) --- */
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="collapsedControl"],
+        button[kind="header"][aria-label*="sidebar" i] {
+            display: none !important;
+            width: 0 !important;
+            visibility: hidden !important;
+        }
+        section[data-testid="stSidebar"] + section > div.block-container,
+        .main .block-container {
+            padding-top: 1rem !important;
+            max-width: 100% !important;
+        }
+
+        /* --- Horizontal navigation bar --- */
+        .valoura-topbar {
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0a1128 100%);
+            border-radius: 14px;
+            padding: 22px 20px 18px 20px;
+            margin: 0 0 22px 0;
+            text-align: center;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+            border: 1px solid rgba(251,191,36,0.15);
+        }
+        .valoura-brand {
+            font-family: 'Georgia', serif;
+            font-size: 2.3em;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 1.5px;
+            text-shadow: 2px 2px 6px rgba(0,0,0,0.5);
+            margin-bottom: 4px;
+        }
+        .valoura-tagline {
+            color: #cbd5e1;
+            font-size: 0.85em;
+            font-style: italic;
+            margin-bottom: 14px;
+        }
+        .valoura-navrow {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .valoura-nav-pill {
+            display: inline-block;
+            padding: 9px 20px;
+            border-radius: 999px;
+            text-decoration: none !important;
+            font-family: 'Georgia', serif;
+            font-weight: 600;
+            font-size: 0.92em;
+            border: 1px solid rgba(255,255,255,0.12);
+            transition: all 0.15s ease-in-out;
+        }
+        .valoura-nav-pill.inactive {
+            background: rgba(255,255,255,0.06);
+            color: #cbd5e1 !important;
+        }
+        .valoura-nav-pill.inactive:hover {
+            background: rgba(251,191,36,0.18);
+            color: #fde68a !important;
+            border-color: rgba(251,191,36,0.4);
+        }
+        .valoura-nav-pill.active {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            color: #0f172a !important;
+            border-color: #fde68a;
+            box-shadow: 0 2px 10px rgba(251,191,36,0.45);
+            font-weight: 700;
+        }
         
         /* --- Headers --- */
         h1, h2, h3, h4, h5, h6 {
@@ -969,42 +1044,59 @@ def main_dashboard():
     if 'dcf_debt' not in st.session_state: st.session_state.dcf_debt = 0.0
     if 'dcf_cash' not in st.session_state: st.session_state.dcf_cash = 0.0
 
-    # --- Sidebar Navigation ---
-    with st.sidebar:
-        st.markdown("# 🌊 Valuora")
-    st.sidebar.markdown("# 🧭 **Navigation**")
-    page = st.sidebar.radio("Select Mode:", ["Financial Analysis", "DCF Model", "Valuation Analysis", "Macro Stress Test", "Company Profile & Roadmap", "Valoura Analysis"])
-    
-    st.sidebar.markdown("---")
-    with st.sidebar:
-        st.markdown("### ⚙️ **Configuration**")
-        ticker_symbol = st.text_input("Stock Ticker", value="AAPL", help="Try: AAPL, MSFT, NVDA, GOOGL").upper()
+    # --- Horizontal Navigation (replaces sidebar) ---
+    import urllib.parse
 
-        # NEW: The 'Analyze' Button
-        analyze_now = st.button("🚀 Run Analysis", use_container_width=True)
+    PAGES = [
+        "Financial Analysis",
+        "DCF Model",
+        "Macro Stress Test",
+        "Company Profile & Roadmap",
+        "Valoura Analysis",
+    ]
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⭐ **Watchlist**")
-    
-    # Initialize watchlist in session state
-    if 'watchlist' not in st.session_state:
-        st.session_state.watchlist = ["AAPL", "TSLA", "NVDA"]
+    if 'active_page' not in st.session_state:
+        st.session_state.active_page = "Financial Analysis"
 
-    # Multiselect for managing the watchlist
-    watchlist_options = st.sidebar.multiselect(
-        "Your Favorites:", 
-        options=list(set(st.session_state.watchlist + [ticker_symbol])), 
-        default=st.session_state.watchlist
+    # Sync from query params (so URL ?page=... drives navigation on click)
+    qp_page = st.query_params.get("page")
+    if qp_page and qp_page in PAGES and qp_page != st.session_state.active_page:
+        st.session_state.active_page = qp_page
+
+    active = st.session_state.active_page
+
+    # Build nav HTML
+    pills_html = ""
+    for p in PAGES:
+        cls = "active" if p == active else "inactive"
+        href = f"?page={urllib.parse.quote(p)}"
+        pills_html += f'<a class="valoura-nav-pill {cls}" href="{href}" target="_self">{p}</a>'
+
+    st.markdown(
+        '<div class="valoura-topbar">'
+        '<div class="valoura-brand">🌊 Valuora</div>'
+        '<div class="valoura-tagline">Context-aware valuation engine</div>'
+        f'<div class="valoura-navrow">{pills_html}</div>'
+        '</div>',
+        unsafe_allow_html=True,
     )
-    st.session_state.watchlist = watchlist_options
-    
-    if page == "Financial Analysis":
-        pass # Removed DCF Settings from here
-    
-    st.sidebar.info("💡 **Tip:** Try TSLA, NVDA, or MSFT for interesting results!")
 
-    # Render System Health Tray
-    render_system_health()
+    # --- Control Row: Ticker input + Run Analysis button ---
+    ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 4])
+    with ctrl1:
+        ticker_symbol = st.text_input(
+            "Stock Ticker",
+            value=st.session_state.get("last_ticker", "AAPL"),
+            help="Try: AAPL, MSFT, NVDA, GOOGL, QBTS, ASTS",
+            label_visibility="collapsed",
+            placeholder="Enter ticker (e.g. AAPL)",
+        ).upper()
+    with ctrl2:
+        analyze_now = st.button("🚀 Run Analysis", use_container_width=True)
+    with ctrl3:
+        st.caption("💡 Try AAPL · MSFT · NVDA · QBTS · ASTS · POET")
+
+    page = active
 
     # --- Ticker Persistence & Reset Logic ---
     # If ticker changes, reset DCF inputs so they can be re-fetched
@@ -1435,483 +1527,6 @@ def main_dashboard():
         *   [TradingView](https://www.tradingview.com) - Advanced charting platform and social network for traders and investors.
         *   [Bloomberg Markets](https://www.bloomberg.com/markets) - Business and financial market news, data, analysis, and video.
         """)
-    
-    # --- PAGE 3: Valuation Analysis ---
-    elif page == "Valuation Analysis":
-        st.markdown(f'<div class="fun-header">⚖️ Smart Valuation: {ticker_symbol}</div>', unsafe_allow_html=True)
-        # st.subheader("Key Valuation Ratios") # Removed subheader to fit new design
-
-        val_data = get_valuation_data(stock, info)
-        
-        # Extended Metrics
-        pe_ratio = val_data['pe']
-        peg_ratio = val_data['peg']
-        eps = val_data['eps']
-        
-        # Growth / Startup Metrics
-        ps_ratio = info.get('priceToSalesTrailing12Months')
-        ev_revenue = info.get('enterpriseToRevenue')
-        rev_growth = info.get('revenueGrowth')
-        
-        # Established Metrics
-        div_yield = info.get('dividendYield')
-        ev_ebitda = info.get('enterpriseToEbitda')
-
-        # Define Segments (Before calling them)
-        def render_growth_segment():
-            st.markdown("### 🚀 Segment 1: Growth & Sales (Startup Focus)")
-            st.markdown("Metrics used for companies focusing on market expansion over immediate profit.")
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if ps_ratio:
-                    display_custom_metric("Price-to-Sales (P/S)", f"{ps_ratio:.2f}")
-                else:
-                    display_custom_metric("Price-to-Sales", "N/A")
-            with c2:
-                if ev_revenue:
-                    display_custom_metric("EV / Revenue", f"{ev_revenue:.2f}")
-                else:
-                    display_custom_metric("EV / Revenue", "N/A")
-            with c3:
-                if rev_growth:
-                    display_custom_metric("Revenue Growth (YoY)", f"{rev_growth*100:.2f}%")
-                else:
-                    display_custom_metric("Revenue Growth", "N/A")
-            
-            st.markdown("""
-            *   **P/S & EV/Sales**: Key for valuing unprofitable companies. Shows how much investors pay for each dollar of sales.
-            *   **Revenue Growth**: The lifeblood of a startup. High growth justifies higher P/S multiples.
-            """)
-            st.markdown("---")
-
-        def render_profit_segment():
-            st.markdown("### 🏛️ Segment 2: Profitability & Value (Established Focus)")
-            st.markdown("Metrics used for companies with consistent earnings and cash return.")
-            
-            c1, c2 = st.columns(2)
-            
-            with c1:
-                st.markdown("#### Earnings Valuation")
-                if pe_ratio:
-                    display_custom_metric("Price-to-Earnings (P/E)", f"{pe_ratio:.2f}")
-                    st.caption(f"Source: {val_data['pe_source']}")
-                    # Crosscheck
-                    if val_data['pe_source'] != "Yahoo Finance" and val_data['yahoo_pe'] and abs(val_data['yahoo_pe'] - pe_ratio) > 0.5:
-                         st.info(f"Crosscheck: Yahoo Finance P/E: {val_data['yahoo_pe']:.2f}")
-                else:
-                    st.warning("P/E Ratio N/A (Negative Earnings)")
-                
-                if ev_ebitda:
-                    display_custom_metric("EV / EBITDA", f"{ev_ebitda:.2f}")
-                    with st.expander("ℹ️ Why EV/EBITDA?"):
-                         st.markdown("""
-                         **Enterprise Value to EBITDA** allows for comparison between companies with different capital structures (debt vs equity) and tax rates. 
-                         It focuses on operating profitability before financial and government influence, providing a cleaner view of core business performance.
-                         """)
-                
-                if div_yield:
-                    display_custom_metric("Dividend Yield", f"{div_yield*100:.2f}%")
-                
-                if eps:
-                     st.markdown(f"**EPS ($):** {eps:.2f} ({val_data['eps_source']})")
-
-                # --- DCF Snippet ---
-                st.markdown("#### 🔮 DCF Snapshot")
-                # Try to get DCF inputs from session state or defaults
-                # Use defaults if session state is 0.0 (uninitialized for new ticker logic above)
-                dcf_fcf = st.session_state.get('dcf_fcf', 0.0)
-                if dcf_fcf == 0.0:
-                     # Try auto-fetch again if not set (simple version)
-                     try:
-                        cf_stmt = stock.cashflow
-                        if not cf_stmt.empty and 'Free Cash Flow' in cf_stmt.index:
-                            dcf_fcf = float(cf_stmt.loc['Free Cash Flow'].iloc[0])
-                     except: pass
-                
-                if dcf_fcf > 0:
-                    dcf_growth = st.session_state.get('dcf_growth', 10.0) / 100.0
-                    dcf_term = st.session_state.get('dcf_terminal', 2.5) / 100.0
-                    dcf_wacc = st.session_state.get('dcf_wacc', 9.0) / 100.0
-                    dcf_debt = st.session_state.get('dcf_debt', 0.0)
-                    dcf_cash = st.session_state.get('dcf_cash', 0.0)
-                    
-                    # If debt/cash are 0, try fetching if not done
-                    if dcf_debt == 0.0:
-                         try: 
-                             bs_stmt = stock.balance_sheet
-                             if not bs_stmt.empty and 'Total Debt' in bs_stmt.index: dcf_debt = float(bs_stmt.loc['Total Debt'].iloc[0])
-                         except: pass
-                    
-                    shares_out = info.get('sharesOutstanding', 1)
-                    
-                    intrinsic_val = calculate_dcf_value(dcf_fcf, dcf_growth, dcf_term, dcf_wacc, dcf_debt, dcf_cash, shares_out)
-                    
-                    curr_p = info.get('currentPrice', 0)
-                    delta_color = "green" if intrinsic_val > curr_p else "red"
-                    
-                    display_custom_metric("Intrinsic Value (DCF)", f"${intrinsic_val:.2f}", color=delta_color)
-                    st.caption(f"Based on {dcf_growth*100:.0f}% growth (5yr) & {dcf_wacc*100:.0f}% WACC.")
-                else:
-                    st.info("DCF Model requires positive Free Cash Flow.")
-
-            with c2:
-                st.markdown("#### PEG Analysis")
-                if peg_ratio is not None:
-                    # Determine if PEG is estimated based on the source text
-                    is_estimated_peg = "Calculated" in (val_data['peg_source'] or "")
-                    
-                    if is_estimated_peg:
-                        display_custom_metric("PEG Ratio (Est.)", f"{peg_ratio:.2f}", help_text="Estimated using avg annual EPS growth.")
-                        st.markdown("**Formula:** `P/E / (Avg EPS Growth * 100)`")
-                    else:
-                        display_custom_metric("PEG Ratio", f"{peg_ratio:.2f}", help_text=f"Source: {val_data['peg_source']}")
-                    
-                    # Negative PEG Check
-                    if peg_ratio < 0:
-                        st.warning("⚠️ Warning: Negative PEG detected due to shrinking earnings. Standard valuation models may not apply. Switch to Price-to-Sales (P/S) for a clearer picture of market sentiment.")
-                    else:
-                        # Determine Label and Explanation
-                        if peg_ratio < 1:
-                            status_label = "Undervalued (< 1.0)"
-                            status_color = "#4ade80"
-                            explanation = "The stock may be undervalued relative to its growth potential. Investors might be underestimating future earnings."
-                        elif 1 <= peg_ratio < 2:
-                            status_label = "Fairly Valued (1.0 - 2.0)"
-                            status_color = "#facc15"
-                            explanation = "The stock price is roughly in line with its expected growth rates. It's priced efficiently."
-                        elif 2 <= peg_ratio < 3:
-                            status_label = "Quite High (2.0 - 3.0)"
-                            status_color = "#fb923c"
-                            explanation = "The stock is trading at a premium. Investors have high expectations for future growth."
-                        else:
-                            status_label = "Overvalued (> 3.0)"
-                            status_color = "#f87171"
-                            explanation = "The stock appears expensive relative to its growth. The market may be overly optimistic or a correction could be due."
-                        
-                        st.markdown(f"#### 🏷️ Status: <span style='color: {status_color};'>{status_label}</span>", unsafe_allow_html=True)
-                        st.caption(explanation)
-
-                        # Gradient Bar Logic
-                        peg_clamped = min(max(peg_ratio, 0.0), 4.0)
-                        marker_pos = (peg_clamped / 4.0) * 100
-                        
-                        st.markdown(f"""
-                        <div style="margin-top: 10px; margin-bottom: 20px;">
-                            <div style="
-                                width: 100%;
-                                height: 20px;
-                                background: linear-gradient(to right, #4ade80, #facc15, #f87171);
-                                border-radius: 10px;
-                                position: relative;
-                                box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
-                            ">
-                                <div style="
-                                    position: absolute;
-                                    left: {marker_pos}%;
-                                    top: -5px;
-                                    width: 30px;
-                                    height: 30px;
-                                    background-color: white;
-                                    border: 3px solid #3b82f6;
-                                    border-radius: 50%;
-                                    transform: translateX(-50%);
-                                    box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-                                "></div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # --- Typewriter Animation for "Showing Work" ---
-                    with st.expander("🧮 See Calculation Details"):
-                        calc_text = ""
-                        if pe_ratio and eps:
-                            calc_text += f"1. EPS (Latest Annual): ${eps:.2f}\n"
-                            calc_text += f"2. P/E Ratio: {pe_ratio:.2f}\n"
-                            try:
-                                inc = stock.income_stmt
-                                if not inc.empty:
-                                    eps_row = inc.loc["Diluted EPS"] if "Diluted EPS" in inc.index else inc.loc["Basic EPS"]
-                                    
-                                    # Recalculate growths for display (mirroring the logic in get_valuation_data)
-                                    valid_growths_disp = []
-                                    growth_steps = []
-                                    for i in range(min(5, len(eps_row) - 1)):
-                                        try:
-                                            c_val = float(eps_row.iloc[i])
-                                            p_val = float(eps_row.iloc[i+1])
-                                            
-                                            # Check for NaNs
-                                            if np.isnan(c_val) or np.isnan(p_val):
-                                                growth_steps.append(f"Growth (Y{i} vs Y{i+1}): N/A (Skipped)")
-                                                continue
-
-                                            if p_val != 0:
-                                                g = (c_val / p_val) - 1
-                                                valid_growths_disp.append(g)
-                                                growth_steps.append(f"Growth (Y{i} vs Y{i+1}): {g*100:.2f}%")
-                                            else:
-                                                growth_steps.append(f"Growth (Y{i} vs Y{i+1}): Undefined (Skipped)")
-                                        except: 
-                                            growth_steps.append(f"Growth (Y{i} vs Y{i+1}): Error (Skipped)")
-                                    
-                                    if valid_growths_disp:
-                                        for step in growth_steps:
-                                            calc_text += f"3. {step}\n"
-                                        avg_g = sum(valid_growths_disp) / len(valid_growths_disp)
-                                        calc_text += f"4. Avg Growth Rate: {avg_g*100:.2f}%\n"
-                                        calc_text += f"5. PEG = {pe_ratio:.2f} / {(avg_g*100):.2f} = {pe_ratio/(avg_g*100):.2f}"
-                                    else:
-                                        calc_text += "Insufficient history for growth calc."
-                            except:
-                                calc_text += "Detailed growth data not available."
-                        else:
-                            calc_text = "Insufficient data to show calculation."
-
-                        typewriter_placeholder = st.empty()
-                        displayed_text = ""
-                        for char in calc_text:
-                            displayed_text += char
-                            typewriter_placeholder.markdown(f"```text\n{displayed_text}\n```")
-                            time.sleep(0.005) 
-                else:
-                     st.info("PEG Ratio data not available (requires positive earnings/growth).")
-            st.markdown("---")
-
-        # --- PHASE 1: DIAGNOSTIC ---
-        status, runway, monthly_burn = classify_cash_position(stock)
-        is_unprofitable = (status == "Cash Burning")
-        
-        if status == "Cash Burning":
-            st.warning(f"🧪 **Diagnostic: Cash Burning (Growth Phase)**")
-            st.write(f"This company is currently spending more than it earns to scale operations. Traditional P/E models are not applicable.")
-            
-            # Show Runway Card
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Monthly Burn", f"-${monthly_burn/1e6:.1f}M")
-            with col2:
-                # Color code runway: Green > 24m, Yellow > 12m, Red < 12m
-                r_color = "normal" if runway > 18 else "inverse"
-                st.metric("Cash Runway", f"{runway:.1f} Months", delta_color=r_color)
-            with col3:
-                st.metric("Classification", "High Growth")
-
-            st.markdown("---")
-            # Trigger Segment 1 Analysis (Sales & Growth)
-            render_growth_segment() # Your existing P/S and EV/Rev code
-            
-        else:
-            st.success(f"🏛️ **Diagnostic: Cash Stable (Mature Phase)**")
-            st.write(f"This company is generating positive cash flow. We will use Earnings-based and Intrinsic Value models.")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Annual FCF", f"Positive ✅")
-            with col2:
-                st.metric("Classification", "Value / Established")
-
-            st.markdown("---")
-            # Trigger Segment 2 Analysis (DCF & P/E)
-            render_profit_segment() # Your existing DCF and P/E code
-        
-        # --- Comparison Segment ---
-        st.markdown("---")
-        st.subheader("🏢 Comparing to Industry")
-        
-        # Get Competitors
-        industry_name, competitor_list = get_competitors(ticker_symbol, info)
-        st.markdown(f"**Industry:** {industry_name}")
-        
-        if competitor_list:
-            with st.spinner(f"Comparing with {', '.join(competitor_list)}..."):
-                comp_df = fetch_comparison_data(ticker_symbol, competitor_list)
-                
-                if not comp_df.empty:
-                    # Styling DataFrame
-                    # Format columns
-                    # 1Y ROI, 5Y ROI -> Percentage
-                    # Highlight main ticker row? Streamlit dataframe styling is limited but we can try basic formatting
-                    
-                    st.dataframe(
-                        comp_df.style.format({
-                            "P/E": "{:.2f}",
-                            "PEG": "{:.2f}",
-                            "ROE": "{:.2f}",
-                            "1Y ROI": "{:.2%}",
-                            "5Y ROI": "{:.2%}"
-                        }).apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
-                    )
-                    
-                    if is_unprofitable:
-                         st.markdown("#### 🚀 Startup/Growth Comparison Table")
-                         growth_cols = ['Ticker', 'P/S', 'EV/Revenue', 'Rev Growth']
-                         growth_df = comp_df[growth_cols].copy()
-                         st.dataframe(
-                            growth_df.style.format({
-                                "P/S": "{:.2f}",
-                                "EV/Revenue": "{:.2f}",
-                                "Rev Growth": "{:.2%}"
-                            }).apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
-                        )
-                    else:
-                         # --- EV/EBITDA Table ---
-                         st.subheader("🏭 Industry EV/EBITDA Comparison")
-                         ev_df = comp_df[['Ticker', 'EV/EBITDA']].copy()
-                         st.dataframe(
-                             ev_df.style.format({"EV/EBITDA": "{:.2f}"})
-                             .apply(lambda x: ['background-color: #facc15; color: black; font-weight: bold;' if x['Ticker'] == ticker_symbol else '' for i in x], axis=1)
-                         )
-
-                    st.markdown("---")
-
-                    # --- Industry Averages Section ---
-                    st.markdown("#### 📊 Industry Averages")
-                    
-                    if is_unprofitable:
-                        avg_ps = comp_df['P/S'].mean()
-                        avg_ev_rev = comp_df['EV/Revenue'].mean()
-                        avg_rev_g = comp_df['Rev Growth'].mean()
-                        
-                        c_avg1, c_avg2, c_avg3 = st.columns(3)
-                        with c_avg1:
-                            display_custom_metric("Avg P/S", f"{avg_ps:.2f}" if not pd.isna(avg_ps) else "N/A")
-                        with c_avg2:
-                             display_custom_metric("Avg EV/Rev", f"{avg_ev_rev:.2f}" if not pd.isna(avg_ev_rev) else "N/A")
-                        with c_avg3:
-                             display_custom_metric("Avg Rev Growth", f"{avg_rev_g:.2%}" if not pd.isna(avg_rev_g) else "N/A")
-                    else:
-                        # Calculate Averages
-                        avg_pe = comp_df['P/E'].mean()
-                        avg_peg = comp_df['PEG'].mean()
-                        avg_roe = comp_df['ROE'].mean()
-                        avg_1y = comp_df['1Y ROI'].mean()
-                        avg_5y = comp_df['5Y ROI'].mean()
-                        
-                        # Display Averages
-                        c_avg1, c_avg2, c_avg3, c_avg4, c_avg5 = st.columns(5)
-                        with c_avg1:
-                            display_custom_metric("Avg P/E", f"{avg_pe:.2f}" if not pd.isna(avg_pe) else "N/A")
-                        with c_avg2:
-                            display_custom_metric("Avg PEG", f"{avg_peg:.2f}" if not pd.isna(avg_peg) else "N/A")
-                        with c_avg3:
-                            display_custom_metric("Avg ROE", f"{avg_roe:.2f}" if not pd.isna(avg_roe) else "N/A")
-                        with c_avg4:
-                            display_custom_metric("Avg 1Y ROI", f"{avg_1y:.2%}" if not pd.isna(avg_1y) else "N/A")
-                        with c_avg5:
-                            display_custom_metric("Avg 5Y ROI", f"{avg_5y:.2%}" if not pd.isna(avg_5y) else "N/A")
-                    
-                    st.markdown("---")
-
-                    # --- Automated Analysis / Verdict (Refactored UI) ---
-                    st.subheader("🖋️ Analyst Verdict & Summary")
-                    
-                    # Get Main Ticker Values
-                    main_row = comp_df[comp_df['Ticker'] == ticker_symbol]
-                    if not main_row.empty:
-                        
-                        if is_unprofitable:
-                            main_ps = main_row.iloc[0]['P/S']
-                            main_rev_g = main_row.iloc[0]['Rev Growth']
-                            avg_ps = comp_df['P/S'].mean()
-                            avg_rev_g = comp_df['Rev Growth'].mean()
-                            
-                            if not pd.isna(main_ps) and not pd.isna(avg_ps):
-                                with st.container():
-                                    col1, col2 = st.columns(2)
-                                    ps_diff = ((main_ps - avg_ps) / avg_ps) * 100
-                                    
-                                    with col1:
-                                        st.metric(
-                                            label="Valuation (P/S)",
-                                            value=f"{main_ps:.2f}",
-                                            delta=f"{ps_diff:.1f}% vs Industry",
-                                            delta_color="inverse"
-                                        )
-                                        st.caption(f"Industry Average: {avg_ps:.2f}")
-                                    
-                                    with col2:
-                                        if not pd.isna(main_rev_g) and not pd.isna(avg_rev_g):
-                                            rev_diff = (main_rev_g - avg_rev_g)
-                                            st.metric(
-                                                label="Growth (Revenue)",
-                                                value=f"{main_rev_g:.2%}",
-                                                delta=f"{rev_diff*100:.1f}% vs Avg",
-                                                delta_color="normal"
-                                            )
-                                            st.caption(f"Industry Average: {avg_rev_g:.2%}")
-                                
-                                st.markdown("### 💡 Interpretation")
-                                st.info("For growth companies, a lower P/S ratio combined with higher revenue growth suggests a potential opportunity. Compare EV/Revenue to validate.")
-                            else:
-                                st.info("Insufficient data for growth verdict.")
-
-                        else:
-                            main_pe = main_row.iloc[0]['P/E']
-                            main_roe = main_row.iloc[0]['ROE']
-                            
-                            if not pd.isna(main_pe) and not pd.isna(avg_pe) and not pd.isna(main_roe) and not pd.isna(avg_roe):
-                                # Create a container for the key metrics
-                                with st.container():
-                                    col1, col2 = st.columns(2)
-                                    
-                                    # P/E Metric Card
-                                    pe_diff = ((main_pe - avg_pe) / avg_pe) * 100
-                                    with col1:
-                                        st.metric(
-                                            label="Valuation (P/E)", 
-                                            value=f"{main_pe:.2f}", 
-                                            delta=f"{pe_diff:.1f}% vs Industry",
-                                            delta_color="inverse" # Red if higher (expensive), Green if lower (cheap)
-                                        )
-                                        st.caption(f"Industry Average: {avg_pe:.2f}")
-
-                                    # ROE Metric Card
-                                    with col2:
-                                        st.metric(
-                                            label="Efficiency (ROE)", 
-                                            value=f"{main_roe:.2f}", 
-                                            delta=f"{(main_roe - avg_roe):.2f} vs Avg",
-                                            delta_color="normal" # Green if higher (good)
-                                        )
-                                        st.caption(f"Industry Average: {avg_roe:.2f}")
-
-                                # Interpretation Section
-                                st.markdown("### 💡 Interpretation")
-                                
-                                pe_status = "undervalued" if main_pe < avg_pe else "overvalued"
-                                st.info(
-                                    f"**Growth/Value Signal:** A P/E of {main_pe:.2f} suggests the market expects higher future growth "
-                                    f"or the stock is currently **{pe_status}** compared to the industry average of {avg_pe:.2f}."
-                                )
-                                
-                                with st.expander("View Management Quality Breakdown"):
-                                    if main_roe > avg_roe:
-                                        st.write(f"The ROE of {main_roe:.2f} indicates superior management and capital allocation compared to the industry average.")
-                                    else:
-                                        st.write(f"The ROE of {main_roe:.2f} indicates management efficiency is lagging behind the industry average.")
-                            else:
-                                st.info("Insufficient data for full automated verdict.")
-                    else:
-                        st.info("Ticker data not found in comparison.")
-
-                else:
-                    st.warning("Could not fetch competitor data.")
-        else:
-            st.info("No specific competitors mapped for this sector.")
-
-        st.markdown("---")
-        st.subheader("📚 Understanding the PEG Ratio")
-        st.markdown("""
-        The **PEG ratio** (Price/Earnings-to-Growth) enhances the P/E ratio by adding expected earnings growth into the calculation. 
-        It is considered a better indicator of a stock's true value than the P/E ratio alone.
-        
-        *   **< 1.0 (Undervalued):** The stock price is considered low relative to its expected growth. This is often seen as a potential "buy" signal for value investors.
-        *   **1.0 - 2.0 (Fairly Valued):** The stock price accurately reflects its expected growth. A PEG of 1.0 is theoretically "perfectly" valued.
-        *   **2.0 - 3.0 (Quite High):** The stock is trading at a premium. Investors are paying a high price for future growth, which increases risk.
-        *   **> 3.0 (Overvalued):** The stock price is significantly higher than its growth rate would justify. The company needs to significantly exceed expected earnings to justify this valuation, or the price is likely a bubble.
-        """)
-
     # --- PAGE 4: Macro Stress Test ---
     elif page == "Macro Stress Test":
         st.markdown('<div class="fun-header">🌍 Geopolitical Command Center</div>', unsafe_allow_html=True)
@@ -2126,6 +1741,67 @@ def main_dashboard():
 
     # --- PAGE 6: Valoura Analysis ---
     elif page == "Valoura Analysis":
+        # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
+        # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
+        HEADER_METRICS = {
+            "FCF Margin Adjusted": ("fcf_margin_adj",     "%",  "FCF margin after SBC adjustment"),
+            "Gross Margin":        ("gross_margin",       "%",  "Gross profit / revenue"),
+            "Revenue Growth YoY":  ("revenue_growth_yoy", "%",  "LTM vs prior LTM"),
+            "Operating Leverage":  ("operating_leverage", "pp", "Op income growth − revenue growth"),
+        }
+
+        _conn_top = get_db_connection()
+        _ticker_in_db = False
+        if _conn_top is not None:
+            _ticker_in_db = _conn_top.execute(
+                "SELECT 1 FROM computed_metrics WHERE ticker=?", (ticker_symbol,)
+            ).fetchone() is not None
+
+        if not _ticker_in_db:
+            st.info(
+                f"ℹ️ **{ticker_symbol}** is not in the Valoura database yet. "
+                "Run the data pipeline to ingest fundamentals + classify this ticker."
+            )
+        else:
+            # Compute industry median for each header metric across all classified tickers
+            import statistics as _stats
+            _cols = [v[0] for v in HEADER_METRICS.values()]
+            _medians = {}
+            for _col in _cols:
+                _vals = [
+                    r[0] for r in _conn_top.execute(
+                        f"SELECT {_col} FROM computed_metrics WHERE {_col} IS NOT NULL"
+                    ).fetchall()
+                ]
+                _medians[_col] = _stats.median(_vals) if _vals else None
+
+            _current_row = _conn_top.execute(
+                f"SELECT {', '.join(_cols)} FROM computed_metrics WHERE ticker=?",
+                (ticker_symbol,)
+            ).fetchone()
+            _cur_vals = dict(zip(_cols, _current_row)) if _current_row else {}
+
+            _hc1, _hc2, _hc3, _hc4 = st.columns(4)
+            _cols_ui = [_hc1, _hc2, _hc3, _hc4]
+            for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
+                _cur = _cur_vals.get(_col)
+                _med = _medians.get(_col)
+                with _cols_ui[_idx]:
+                    if _cur is None:
+                        st.metric(_label, "—", help=_tip)
+                    else:
+                        _value_str = f"{_cur:.1f}%" if _unit == "%" else f"{_cur:.1f}pp"
+                        if _med is not None:
+                            _delta = _cur - _med
+                            _delta_str = f"{_delta:+.1f}{_unit} vs median ({_med:.1f}{_unit})"
+                            # delta_color="normal" → green if positive, red if negative.
+                            # All 4 metrics are "higher is better" so default is correct.
+                            st.metric(_label, _value_str, delta=_delta_str, help=_tip)
+                        else:
+                            st.metric(_label, _value_str, help=_tip)
+
+            st.markdown("---")
+
         st.markdown(f"<div class='fun-header'>🎯 Valoura Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
 
         # ── Constants ────────────────────────────────────────────────────────
