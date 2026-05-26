@@ -500,6 +500,89 @@ def get_av_key():
     except:
         return None # Graceful fallback
 
+def get_secret(key, default=None):
+    """Read a secret from Streamlit secrets (cloud) or env var (local).
+    Used by Valoura Interpretation engine to fetch GEMINI_API_KEY."""
+    import os
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
+# --- VALORA INTERPRETATION ENGINE (Gemini-powered structured synthesis) ---
+_VALOURA_INTERP_SYSTEM_PROMPT = """You are a financial analyst writing the interpretation section of an
+equity research note. You have access to quantitative classification
+data, valuation metrics, fair-value ranges, and peer comparisons for
+a specific stock.
+
+Your job is to synthesise this data into a structured, factual
+interpretation. You must:
+- State what the data shows, not what an investor should do
+- Compare the ticker to its peer group and fair ranges explicitly
+- Identify the one or two most significant signals (positive or negative)
+- Flag any tensions or contradictions in the data
+- Never use the words "buy", "sell", "overweight", "underweight",
+  "recommend", or any equivalent
+- Write in plain English, no jargon without explanation
+- Maximum 200 words total across all sections"""
+
+_VALOURA_INTERP_OUTPUT_SCHEMA = """Return JSON only, no preamble, no markdown fences. Exact schema:
+{
+  "classification_summary": "<1-2 sentences: what the classification tells us about this business at this stage>",
+  "valuation_position": "<1-2 sentences: where the primary metric sits vs fair range and vs cell peers — use the actual numbers>",
+  "strongest_signal": "<1 sentence: the single most notable data point, positive or negative, with the number>",
+  "tension": "<1 sentence: any contradiction in the data worth noting, or null if none>",
+  "peer_context": "<1 sentence: how this ticker compares to others in the same matrix cell — use peer count and relative position>",
+  "data_caveats": "<1 sentence: any active flags or data quality issues that affect interpretation reliability, or null if clean>"
+}"""
+
+
+def _generate_valoura_interpretation(context_dict):
+    """Call Gemini to produce a structured interpretation from the context payload.
+    Returns (parsed_json_dict, None) on success, or (None, error_message) on failure.
+    """
+    api_key = get_secret("GEMINI_API_KEY")
+    if not api_key:
+        return None, "GEMINI_API_KEY not configured"
+
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        return None, "google-generativeai package not installed"
+
+    try:
+        genai.configure(api_key=api_key)
+        # gemini-2.0-flash deprecated; use 2.5-flash-lite (no-thinking, fast, free-tier friendly).
+        # Matches the model used by the data pipeline's BM tiebreaker.
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        prompt = (
+            _VALOURA_INTERP_SYSTEM_PROMPT
+            + "\n\nContext payload (JSON):\n"
+            + json.dumps(context_dict, indent=2, default=str)
+            + "\n\n"
+            + _VALOURA_INTERP_OUTPUT_SCHEMA
+        )
+        resp = model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 400, "temperature": 0.3},
+        )
+        text = (resp.text or "").strip()
+        # Strip code fences if Gemini wraps the JSON
+        if text.startswith("```"):
+            text = text.strip("`").strip()
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+            # Remove trailing fence remnants
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        parsed = json.loads(text)
+        return parsed, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {str(e)[:120]}"
+
 # --- 2. THE SYSTEM HEALTH TRAY (Place in Sidebar) ---
 def render_system_health():
     st.sidebar.markdown("---")
@@ -1970,7 +2053,8 @@ def main_dashboard():
                 "SELECT bm_category, fh_stage, matrix_cell, bm_confidence, bm_method, bm_llm_rationale, "
                 "bm_decision_trace, bm_validators_json, "
                 "fh_fcf_stage, fh_gm_stage, fh_runway_stage, fh_oplev_stage, "
-                "fh_sbc_stage, fh_de_stage, fh_roic_stage, fh_weighted_score, fh_fcf_hard_cap_applied "
+                "fh_sbc_stage, fh_de_stage, fh_roic_stage, fh_weighted_score, fh_fcf_hard_cap_applied, "
+                "as_of_date "
                 "FROM classifications WHERE ticker=?",
                 (ticker_symbol,)
             ).fetchone()
@@ -1982,7 +2066,8 @@ def main_dashboard():
                 (bm_category, fh_stage, matrix_cell, bm_confidence, bm_method, bm_llm_rationale,
                  bm_decision_trace_str, bm_validators_str,
                  fh_fcf_stage, fh_gm_stage, fh_runway_stage, fh_oplev_stage,
-                 fh_sbc_stage, fh_de_stage, fh_roic_stage, fh_weighted_score, fh_fcf_hard_cap) = cls_row
+                 fh_sbc_stage, fh_de_stage, fh_roic_stage, fh_weighted_score, fh_fcf_hard_cap,
+                 as_of_date) = cls_row
 
                 stage_label = STAGE_LABELS.get(fh_stage, f"Stage {fh_stage}")
 
@@ -2261,7 +2346,80 @@ def main_dashboard():
 
                     st.markdown("---")
 
-                # ── Row 3: Matrix-cell peers (unchanged) ──────────────────────
+                # ── Sector Peers — same business model (any stage) ────────────
+                _bm_label = bm_category.replace("_", " ").title()
+                st.subheader(f"🏢 Sector Peers — {_bm_label}")
+                st.caption(
+                    f"All tickers classified as **{bm_category}**, regardless of stage. "
+                    "Shows how {} stacks up on the four core fundamentals.".format(ticker_symbol)
+                )
+
+                _sector_rows = conn_vb.execute(
+                    """
+                    SELECT c.ticker, c.matrix_cell,
+                           m.fcf_margin_adj, m.gross_margin,
+                           m.revenue_growth_yoy, m.operating_leverage
+                    FROM classifications c
+                    LEFT JOIN computed_metrics m ON c.ticker = m.ticker
+                    WHERE c.bm_category = ?
+                    ORDER BY c.ticker
+                    """,
+                    (bm_category,),
+                ).fetchall()
+
+                if len(_sector_rows) > 1:
+                    _peer_records = [
+                        {
+                            "Ticker":           r[0],
+                            "Cell":             r[1],
+                            "FCF Margin (adj)": r[2],
+                            "Gross Margin":     r[3],
+                            "Rev Growth YoY":   r[4],
+                            "Op Leverage":      r[5],
+                        }
+                        for r in _sector_rows
+                    ]
+                    _peer_df = pd.DataFrame(_peer_records)
+
+                    # Compute medians (excluding None) before formatting
+                    _med_fcf  = _peer_df["FCF Margin (adj)"].median()
+                    _med_gm   = _peer_df["Gross Margin"].median()
+                    _med_rg   = _peer_df["Rev Growth YoY"].median()
+                    _med_opl  = _peer_df["Op Leverage"].median()
+
+                    def _fmt_pct(v):
+                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
+                    def _fmt_pp(v):
+                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}pp"
+
+                    _display_df = _peer_df.copy()
+                    _display_df["FCF Margin (adj)"] = _display_df["FCF Margin (adj)"].apply(_fmt_pct)
+                    _display_df["Gross Margin"]    = _display_df["Gross Margin"].apply(_fmt_pct)
+                    _display_df["Rev Growth YoY"]  = _display_df["Rev Growth YoY"].apply(_fmt_pct)
+                    _display_df["Op Leverage"]     = _display_df["Op Leverage"].apply(_fmt_pp)
+
+                    _styled = _display_df.style.apply(
+                        lambda row: [
+                            'background-color: rgba(251,191,36,0.22); color: #0f172a; font-weight: 700;'
+                            if row["Ticker"] == ticker_symbol else ''
+                            for _ in row
+                        ],
+                        axis=1,
+                    )
+                    st.dataframe(_styled, use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"**Sector median ({len(_peer_df)} {_bm_label} tickers):**  "
+                        f"FCF {_fmt_pct(_med_fcf)} · "
+                        f"GM {_fmt_pct(_med_gm)} · "
+                        f"RevG {_fmt_pct(_med_rg)} · "
+                        f"OpLev {_fmt_pp(_med_opl)}"
+                    )
+                else:
+                    st.write(f"No other **{_bm_label}** tickers in the universe yet — {ticker_symbol} is the only one classified so far.")
+
+                st.markdown("---")
+
+                # ── Row 3: Matrix-cell peers (narrower — same stage too) ──────
                 st.subheader("🔍 Matrix Cell Peers")
                 peer_rows = conn_vb.execute(
                     "SELECT ticker FROM classifications WHERE matrix_cell=? AND ticker!=? ORDER BY ticker",
@@ -2282,6 +2440,184 @@ def main_dashboard():
                     st.write(bm_llm_rationale)
                 else:
                     st.write("Classification derived from quantitative signals (no LLM rationale recorded).")
+
+                st.markdown("---")
+
+                # ── Row 5: VALOURA INTERPRETATION (Gemini-powered) ────────────
+                _interp_hdr_l, _interp_hdr_r = st.columns([5, 1])
+                with _interp_hdr_l:
+                    st.subheader("🔮 Valoura Interpretation")
+                with _interp_hdr_r:
+                    _regen_clicked = st.button(
+                        "🔄 Regenerate",
+                        key=f"regen_interp_{ticker_symbol}",
+                        help="Clear cache and re-call Gemini",
+                        use_container_width=True,
+                    )
+
+                _interp_cache_key = f"valoura_interp_{ticker_symbol}_{as_of_date}"
+                if _regen_clicked and _interp_cache_key in st.session_state:
+                    del st.session_state[_interp_cache_key]
+
+                if _interp_cache_key not in st.session_state:
+                    # Build the context payload from the data we already have in scope
+                    _cur_metrics_row = conn_vb.execute(
+                        "SELECT fcf_margin_adj, gross_margin, revenue_growth_yoy, "
+                        "operating_leverage, sbc_pct_revenue, debt_equity_ratio, "
+                        "net_income_quality_flag, is_self_funded "
+                        "FROM computed_metrics WHERE ticker=?",
+                        (ticker_symbol,),
+                    ).fetchone()
+                    if _cur_metrics_row:
+                        (_cm_fcf, _cm_gm, _cm_rg, _cm_opl, _cm_sbc, _cm_de,
+                         _cm_ni_flag, _cm_self_fund) = _cur_metrics_row
+                    else:
+                        _cm_fcf = _cm_gm = _cm_rg = _cm_opl = _cm_sbc = _cm_de = None
+                        _cm_ni_flag = _cm_self_fund = None
+
+                    # valuation_metrics: zip fair-range table with current values
+                    _val_metrics = []
+                    _val_data_local = val_data if (val_row and val_json_str) else {}
+                    for (_dn, _vk, _lo, _hi, _u, _kind) in FAIR_RANGES_FULL.get(matrix_cell, []):
+                        _cv = _val_data_local.get(_vk)
+                        _verdict = None
+                        if _cv is not None:
+                            try:
+                                _cvf = float(_cv)
+                                if _kind == "yield":
+                                    _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf > _hi else "rich")
+                                elif _kind == "score":
+                                    _verdict = "good" if _lo <= _cvf <= _hi else ("strong" if _cvf > _hi else "weak")
+                                else:
+                                    _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf < _lo else "rich")
+                            except (TypeError, ValueError):
+                                pass
+                        _val_metrics.append({
+                            "metric_name": _dn,
+                            "metric_value": _cv,
+                            "fair_range_low": _lo,
+                            "fair_range_high": _hi,
+                            "unit": _u,
+                            "verdict": _verdict,
+                        })
+
+                    # cell_peers: tickers in same matrix_cell with primary metric value
+                    _cell_peer_rows = conn_vb.execute(
+                        "SELECT c.ticker, v.primary_method, v.valuation_json "
+                        "FROM classifications c LEFT JOIN valuations v ON c.ticker=v.ticker "
+                        "WHERE c.matrix_cell=?",
+                        (matrix_cell,),
+                    ).fetchall()
+                    _cell_peers = []
+                    _primary_keys_for_cell = [t[1] for t in FAIR_RANGES_FULL.get(matrix_cell, [])][:1]
+                    _primary_key = _primary_keys_for_cell[0] if _primary_keys_for_cell else None
+                    for _pr_ticker, _pr_method, _pr_json in _cell_peer_rows:
+                        _pv = None
+                        if _pr_json and _primary_key:
+                            try:
+                                _pv = json.loads(_pr_json).get(_primary_key)
+                            except Exception:
+                                pass
+                        _cell_peers.append({
+                            "ticker": _pr_ticker,
+                            "primary_metric": _primary_key,
+                            "primary_value": _pv,
+                        })
+
+                    # cell_medians: 4 header metrics for same-cell tickers
+                    _cell_med_query = conn_vb.execute(
+                        "SELECT m.fcf_margin_adj, m.gross_margin, "
+                        "m.revenue_growth_yoy, m.operating_leverage "
+                        "FROM classifications c JOIN computed_metrics m ON c.ticker=m.ticker "
+                        "WHERE c.matrix_cell=?",
+                        (matrix_cell,),
+                    ).fetchall()
+                    import statistics as _stats2
+                    def _med(values):
+                        vs = [v for v in values if v is not None]
+                        return _stats2.median(vs) if vs else None
+                    _cell_medians = {
+                        "fcf_margin_adj":     _med([r[0] for r in _cell_med_query]),
+                        "gross_margin":       _med([r[1] for r in _cell_med_query]),
+                        "revenue_growth_yoy": _med([r[2] for r in _cell_med_query]),
+                        "operating_leverage": _med([r[3] for r in _cell_med_query]),
+                    }
+
+                    # rpo_spread
+                    _rpo_spread = _val_data_local.get("rpo_spread_pp")
+
+                    # active_flags — synthesise from quality / qualifier fields
+                    _flags = []
+                    if _cm_ni_flag:
+                        _flags.append("net_income_quality_flag")
+                    if fh_fcf_hard_cap:
+                        _flags.append("fh_fcf_hard_cap_applied")
+                    if _val_data_local.get("rpo_qualifier_note"):
+                        _flags.append(f"rpo:{_val_data_local['rpo_qualifier_note']}")
+                    if _cm_self_fund == 0:
+                        _flags.append("not_self_funded")
+
+                    _context = {
+                        "ticker":               ticker_symbol,
+                        "as_of_date":           as_of_date,
+                        "bm_category":          bm_category,
+                        "fh_stage":             fh_stage,
+                        "matrix_cell":          matrix_cell,
+                        "fh_weighted_score":    fh_weighted_score,
+                        "fcf_margin_adj":       _cm_fcf,
+                        "gross_margin":         _cm_gm,
+                        "revenue_growth_yoy":   _cm_rg,
+                        "operating_leverage":   _cm_opl,
+                        "sbc_pct_revenue":      _cm_sbc,
+                        "debt_equity_ratio":    _cm_de,
+                        "valuation_metrics":    _val_metrics,
+                        "cell_peers":           _cell_peers,
+                        "cell_medians":         _cell_medians,
+                        "rpo_spread":           _rpo_spread,
+                        "active_flags":         _flags,
+                    }
+
+                    with st.spinner("Generating Valoura interpretation..."):
+                        _result, _err = _generate_valoura_interpretation(_context)
+                    if _result:
+                        st.session_state[_interp_cache_key] = _result
+                    else:
+                        st.session_state[_interp_cache_key] = {"_error": _err}
+
+                _interp = st.session_state.get(_interp_cache_key, {})
+                if "_error" in _interp:
+                    st.info("Interpretation unavailable — Gemini API error. Check GEMINI_API_KEY and credits.")
+                    st.caption(f"_Debug: {_interp.get('_error', 'unknown')}_")
+                else:
+                    # Render structured fields with labelled blocks
+                    if _interp.get("classification_summary"):
+                        st.markdown("**Classification summary**")
+                        st.write(_interp["classification_summary"])
+                    if _interp.get("valuation_position"):
+                        st.markdown("**Valuation position**")
+                        st.write(_interp["valuation_position"])
+                    if _interp.get("strongest_signal"):
+                        st.markdown("**Strongest signal**")
+                        st.write(_interp["strongest_signal"])
+                    if _interp.get("tension"):
+                        st.markdown("**Tension in the data**")
+                        st.write(_interp["tension"])
+                    if _interp.get("peer_context"):
+                        st.markdown("**Peer context**")
+                        st.write(_interp["peer_context"])
+                    if _interp.get("data_caveats"):
+                        st.markdown("🔍 **Data caveats**")
+                        st.write(_interp["data_caveats"])
+
+                st.markdown(
+                    "<p style='color:#94a3b8;font-style:italic;font-size:0.82em;"
+                    "margin-top:14px;border-top:1px solid #1e293b;padding-top:10px;'>"
+                    "This interpretation is generated from quantitative classification data only. "
+                    "It is not financial advice and does not constitute a recommendation to buy "
+                    "or sell any security."
+                    "</p>",
+                    unsafe_allow_html=True,
+                )
 
 # --- Helper Function: Mock AI Analysis ---
 def generate_ai_verdict(info, news, history, ticker=None):
