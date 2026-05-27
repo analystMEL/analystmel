@@ -966,6 +966,36 @@ def main_dashboard():
             font-style: italic;
             margin-bottom: 14px;
         }
+        /* --- Help tooltip icon (next to st.metric label) — make it visible --- */
+        [data-testid="stTooltipIcon"],
+        [data-testid="stTooltipHoverTarget"],
+        .stTooltipIcon,
+        button[kind="tooltipIcon"] {
+            color: #ffffff !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stTooltipIcon"] svg,
+        [data-testid="stTooltipHoverTarget"] svg,
+        .stTooltipIcon svg,
+        button[kind="tooltipIcon"] svg,
+        [data-testid="stMetricLabel"] svg {
+            color: #ffffff !important;
+            fill: #ffffff !important;
+            opacity: 1 !important;
+            stroke: #ffffff !important;
+        }
+        /* Tooltip popup itself — make sure markdown lists render with visible bullets */
+        [data-baseweb="tooltip"] ul,
+        [role="tooltip"] ul {
+            padding-left: 18px !important;
+            margin: 4px 0 !important;
+        }
+        [data-baseweb="tooltip"] li,
+        [role="tooltip"] li {
+            margin: 4px 0 !important;
+            line-height: 1.45 !important;
+        }
+
         /* --- Nav pills rendered as st.buttons (AJAX rerun, no full reload) --- */
         /* Inactive (secondary) — translucent dim pill */
         div[data-testid="stButton"] > button[kind="secondary"],
@@ -1831,11 +1861,32 @@ def main_dashboard():
     elif page == "Valoura Analysis":
         # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
         # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
+        # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
         HEADER_METRICS = {
-            "FCF Margin Adjusted": ("fcf_margin_adj",     "%",  "FCF margin after SBC adjustment"),
-            "Gross Margin":        ("gross_margin",       "%",  "Gross profit / revenue"),
-            "Revenue Growth YoY":  ("revenue_growth_yoy", "%",  "LTM vs prior LTM"),
-            "Operating Leverage":  ("operating_leverage", "pp", "Op income growth − revenue growth"),
+            "FCF Margin Adjusted": (
+                "fcf_margin_adj", "%",
+                "- **What it is:** Free cash flow margin, adjusted to add back stock-based compensation (SBC).\n"
+                "- **How it's used:** The cleanest read of true cash profitability — how much cash the business generates per dollar of revenue, ignoring accounting noise.\n"
+                "- **High/low:** Above 20% indicates a cash-generative business with pricing power; 5–15% is typical for mature scaling; below 0% means the company is burning cash."
+            ),
+            "Gross Margin": (
+                "gross_margin", "%",
+                "- **What it is:** Gross profit divided by revenue (revenue minus cost of goods sold).\n"
+                "- **How it's used:** Measures unit economics — how much revenue is left after the direct cost of producing or delivering the product.\n"
+                "- **High/low:** Above 70% is typical for software/SaaS; 40–60% for hardware or hyperscale infrastructure; below 30% suggests a commoditised product or scale-economics business."
+            ),
+            "Revenue Growth YoY": (
+                "revenue_growth_yoy", "%",
+                "- **What it is:** Percentage change in trailing-12-month revenue versus the prior 12 months.\n"
+                "- **How it's used:** Top-line momentum check; paired with margins to assess whether growth is profitable or just spending-driven.\n"
+                "- **High/low:** Above 30% indicates strong demand and market expansion; 10–20% is mature growth; below 5% suggests market saturation or competitive pressure."
+            ),
+            "Operating Leverage": (
+                "operating_leverage", "pp",
+                "- **What it is:** Operating income growth rate minus revenue growth rate (in percentage points).\n"
+                "- **How it's used:** Shows whether costs are scaling slower than revenue — positive numbers mean margins are expanding as the business grows.\n"
+                "- **High/low:** Above +5pp means strong margin expansion; near 0pp means linear scaling; negative means costs are growing faster than revenue (margin compression)."
+            ),
         }
 
         _conn_top = get_db_connection()
@@ -1921,34 +1972,69 @@ def main_dashboard():
             "rule_of_40":        ("Rule of 40",        "%"),
             "arr":               ("ARR",               "$B"),
         }
-        # Addition 2: formula source per metric key
-        METRIC_SOURCES = {
-            "peg_ratio":         "Formula: P/E ÷ EPS growth rate (trailing 2yr CAGR)",
-            "capex_adj_ev_ebit": "Formula: (EV + CapEx) ÷ EBIT — income statement + cash flow statement",
-            "ev_ebitda":         "Formula: Enterprise Value ÷ EBITDA — income statement + cash flow",
-            "ev_fcf":            "Formula: Enterprise Value ÷ (OCF − CapEx − SBC) from cash flow statement",
-            "fcf_yield":         "Formula: FCF ÷ Market cap × 100 — cash flow statement",
-            "pe_ratio":          "Formula: Share price ÷ EPS — income statement",
-            "ev_ntm_arr":        "Formula: EV ÷ (Current ARR × NRR) — ARR from SEC 8-K earnings release",
-            "cycle_adj_pe":      "Formula: Price ÷ 3yr average mid-cycle EPS — income statement (normalised)",
-            "ev_gross_profit":   "Formula: Enterprise Value ÷ Gross Profit — income statement",
-            "ps_ratio":          "Formula: Market cap ÷ trailing 12M revenue — income statement",
-            "rule_of_40":        "Formula: Revenue growth % + FCF margin % — income statement + cash flow",
-            "arr":               "Source: ARR from SEC 8-K earnings release (management disclosed)",
-        }
-        METRIC_EXPLANATIONS = {
-            "peg_ratio":         "A growth-adjusted P/E — below 1.0x suggests undervaluation relative to earnings growth; above 2.0x indicates the market is pricing in significant acceleration.",
-            "capex_adj_ev_ebit": "Normalises EV/EBIT for CapEx intensity: hyperscalers investing heavily in infrastructure look cheap on raw EV/EBIT, so adding CapEx back enables like-for-like comparison.",
-            "ev_ebitda":         "How many years of EBITDA to 'buy' the company — useful for mature businesses, but ignores CapEx intensity; compare within the same BM category only.",
-            "ev_fcf":            "A purer cash multiple — FCF is after CapEx and SBC, reflecting true shareholder cash generation. Preferred over EV/EBITDA for CapEx-heavy businesses.",
-            "fcf_yield":         "The inverse of EV/FCF as a percentage — higher yield means more cash generated per dollar of enterprise value. Stage 4 benchmark is 2–4%.",
-            "pe_ratio":          "Classic earnings multiple — sensitive to accounting choices and one-time items. Less reliable for companies with high non-cash charges or elevated SBC.",
-            "ev_ntm_arr":        "Forward recurring revenue multiple — the standard SaaS benchmark pre-profitability. NTM ARR is estimated as current ARR × net revenue retention.",
-            "cycle_adj_pe":      "Normalises P/E across the semi cycle by averaging EPS over three years — avoids overpaying at a trough or appearing cheap at a cycle peak.",
-            "ev_gross_profit":   "Used for hardware/deep tech with volatile EBIT — gross profit is a more stable anchor than operating income when R&D spend swings materially.",
-            "ps_ratio":          "Price-to-Sales — meaningful only for pre-profit companies. Compresses quickly on the path to profitability; compare only within the same BM category.",
-            "rule_of_40":        "Combined growth + FCF margin score. Above 40 is acceptable, above 60 is elite for mature SaaS. Below 20 at Stage 3+ is a quality warning.",
-            "arr":               "Annual Recurring Revenue — the contractual forward revenue base. ARR growth rate and net revenue retention are the key quality signals, not the level.",
+        # Per-metric tooltip text — 3 markdown bullets rendered inside the hover popup
+        # (what / how used / high-low interpretation)
+        METRIC_TOOLTIPS = {
+            "peg_ratio": (
+                "- **What it is:** P/E ratio divided by the company's earnings growth rate (trailing 2yr CAGR).\n"
+                "- **How it's used:** Adjusts P/E for growth trajectory — a fairer cross-company comparison than P/E alone.\n"
+                "- **High/low:** Below 1.0x suggests undervaluation vs growth; 1.0–2.0x is fair; above 2.0x means the market is pricing in significant acceleration."
+            ),
+            "capex_adj_ev_ebit": (
+                "- **What it is:** Enterprise value plus CapEx, divided by operating income (EBIT).\n"
+                "- **How it's used:** Normalises EV/EBIT for capital intensity — fairer comparison across hyperscalers with very different infrastructure investment.\n"
+                "- **High/low:** Below 20x is cheap for a Stage-3 hyperscaler; 20–35x is fair; above 50x indicates extreme growth expectations."
+            ),
+            "ev_ebitda": (
+                "- **What it is:** Enterprise value divided by earnings before interest, tax, depreciation and amortisation.\n"
+                "- **How it's used:** How many years of operating cash earnings it would take to 'buy' the company; the standard multiple for mature businesses.\n"
+                "- **High/low:** Below 12x is cheap; 12–25x fair; above 35x rich (typically requires high growth or a strong moat)."
+            ),
+            "ev_fcf": (
+                "- **What it is:** Enterprise value divided by free cash flow (OCF minus CapEx minus stock-based comp).\n"
+                "- **How it's used:** A purer cash multiple — preferred over EV/EBITDA when CapEx and SBC are material to the business model.\n"
+                "- **High/low:** Below 20x cheap; 25–45x fair for Stage-3 SaaS; above 60x suggests aggressive growth optimism."
+            ),
+            "fcf_yield": (
+                "- **What it is:** Free cash flow divided by market cap, expressed as a percentage (the inverse of EV/FCF).\n"
+                "- **How it's used:** Tells you what percentage of your investment is 'returned' annually as cash — directly comparable to bond yields.\n"
+                "- **High/low:** Above 5% indicates strong cash returns; 2–4% typical for mature compounders; below 1% means the stock is priced as a pure growth story."
+            ),
+            "pe_ratio": (
+                "- **What it is:** Stock price divided by earnings per share (market cap divided by net income).\n"
+                "- **How it's used:** Classic earnings multiple — the quickest read of how much investors pay per dollar of reported profit.\n"
+                "- **High/low:** Below 15x is the value zone; 15–25x fair; above 40x has growth fully baked in. Misleads when non-cash charges or buybacks are large."
+            ),
+            "ev_ntm_arr": (
+                "- **What it is:** Enterprise value divided by next-twelve-month annual recurring revenue.\n"
+                "- **How it's used:** SaaS-specific forward multiple — accounts for the recurring, contracted nature of subscription revenue.\n"
+                "- **High/low:** Below 8x is cheap for Stage 2; 8–18x is fair; above 25x typically reserved for hypergrowth or clear category leaders."
+            ),
+            "cycle_adj_pe": (
+                "- **What it is:** Price divided by 3-year average mid-cycle earnings (smooths semiconductor cyclicality).\n"
+                "- **How it's used:** Avoids overpaying at the cycle trough or appearing 'cheap' at the cycle peak in inherently cyclical industries.\n"
+                "- **High/low:** Below 20x is cheap for semis; 20–35x fair; above 50x means the market is pricing in a structural shift, not just a cycle peak."
+            ),
+            "ev_gross_profit": (
+                "- **What it is:** Enterprise value divided by gross profit.\n"
+                "- **How it's used:** Used for hardware and deep-tech businesses with volatile EBIT — gross profit is a more stable anchor than operating income.\n"
+                "- **High/low:** Below 15x is cheap; 15–30x fair; above 50x suggests an early-stage growth story being priced aggressively."
+            ),
+            "ps_ratio": (
+                "- **What it is:** Market capitalisation divided by trailing-12-month revenue.\n"
+                "- **How it's used:** Used for pre-profit companies where P/E doesn't apply; only compare within the same business model.\n"
+                "- **High/low:** Below 5x typical for hardware; 5–15x for growth software; above 30x indicates a speculative bet on category dominance."
+            ),
+            "rule_of_40": (
+                "- **What it is:** Revenue growth percentage plus FCF margin percentage.\n"
+                "- **How it's used:** SaaS quality score combining growth and profitability — does the company offset slowing growth with rising margins?\n"
+                "- **High/low:** Above 60% elite; 40–60% strong; 25–40% solid; below 20% is a quality warning, especially at Stage 3 and beyond."
+            ),
+            "arr": (
+                "- **What it is:** Annualised recurring/subscription revenue base as reported by management (SEC 8-K earnings releases).\n"
+                "- **How it's used:** The forward revenue base that drives SaaS valuations — quality signals are growth rate and net revenue retention, not the level.\n"
+                "- **High/low:** Level alone tells you size; pair with growth rate (above 30% strong, below 20% slowing) and NRR (above 115% expanding, below 100% churning)."
+            ),
         }
         # Addition 3: all metrics with fair ranges per cell
         # Each tuple: (display_name, val_data_key, low, high, unit, kind)
@@ -2255,21 +2341,17 @@ def main_dashboard():
                     ]
 
                     if display_items:
-                        st.caption("🔍 *Hover over each metric label for the formula and plain-English explanation.*")
+                        st.caption("🔍 *Hover over the ⓘ icon next to each metric label for what the metric is, how it's used, and what high/low values typically mean.*")
                         metric_cols = st.columns(min(len(display_items), 4))
                         for idx, (key, value) in enumerate(display_items):
                             label, suffix = METRIC_LABELS[key]
                             col = metric_cols[idx % len(metric_cols)]
 
-                            # Build tooltip text: formula + explanation (renders on hover)
-                            src  = METRIC_SOURCES.get(key, "")
-                            expl = METRIC_EXPLANATIONS.get(key, "See CLAUDE.md for metric definitions.")
-                            tooltip_parts = []
-                            if src:
-                                tooltip_parts.append(f"📐 {src}")
-                            if expl:
-                                tooltip_parts.append(f"💡 {expl}")
-                            help_text = "\n\n".join(tooltip_parts) if tooltip_parts else None
+                            # 3-bullet tooltip (what / how used / interpretation) — renders on hover
+                            help_text = METRIC_TOOLTIPS.get(
+                                key,
+                                "See CLAUDE.md for metric definitions."
+                            )
 
                             try:
                                 if suffix == "%":
@@ -2319,27 +2401,36 @@ def main_dashboard():
                                 try:
                                     cur_f   = float(cur_raw)
                                     cur_str = f"{cur_f:.1f}{fr_unit}"
+                                    # Standardised 3-tier verdict: Good / Fair / Poor
+                                    # (higher direction depends on the metric kind, but the
+                                    # quality label is consistent across all three kinds)
+                                    _GOOD = '<span style="color:#22c55e;font-weight:700;">✅ Good</span>'
+                                    _FAIR = '<span style="color:#fbbf24;font-weight:700;">⚖️ Fair</span>'
+                                    _POOR = '<span style="color:#ef4444;font-weight:700;">🔴 Poor</span>'
                                     if kind == "yield":
+                                        # Higher yield = better → above range is GOOD, below is POOR
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Fair</span>'
+                                            verdict_html = _FAIR
                                         elif cur_f > fr_high:
-                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💰 Cheap</span>'
+                                            verdict_html = _GOOD
                                         else:
-                                            verdict_html = '<span style="color:#ef4444;font-weight:700;">🔴 Rich</span>'
+                                            verdict_html = _POOR
                                     elif kind == "score":
+                                        # Higher score = better → above range is GOOD, below is POOR
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Good</span>'
+                                            verdict_html = _FAIR
                                         elif cur_f > fr_high:
-                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💚 Strong</span>'
+                                            verdict_html = _GOOD
                                         else:
-                                            verdict_html = '<span style="color:#f59e0b;font-weight:700;">⚠️ Weak</span>'
+                                            verdict_html = _POOR
                                     else:  # multiple
+                                        # Higher multiple = more expensive → above range is POOR, below is GOOD
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Fair</span>'
+                                            verdict_html = _FAIR
                                         elif cur_f < fr_low:
-                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💰 Cheap</span>'
+                                            verdict_html = _GOOD
                                         else:
-                                            verdict_html = '<span style="color:#ef4444;font-weight:700;">🔴 Rich</span>'
+                                            verdict_html = _POOR
                                 except (TypeError, ValueError):
                                     cur_str      = str(cur_raw)
                                     verdict_html = '<span style="color:#64748b;">—</span>'
