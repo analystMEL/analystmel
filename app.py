@@ -2081,23 +2081,32 @@ def main_dashboard():
                 st.caption(f"**{stage_label}**")
 
                 # ── Addition 1: Matrix position visualiser ────────────────────
+                # Short labels (fit narrow screens — no horizontal scroll)
+                CAT_SHORT = {
+                    "hyperscale":        "Hyperscale",
+                    "saas":              "SaaS",
+                    "semi_hardware":     "Semi/HW",
+                    "consumer_internet": "Consumer",
+                    "deep_tech":         "Deep Tech",
+                }
+
                 grid_rows = []
                 header_ths = (
-                    '<th style="background:#0a0f1a;color:#475569;padding:7px 6px;'
-                    'font-size:0.68em;border:1px solid #1e293b;min-width:60px;"></th>'
+                    '<th style="background:#1e293b;color:#cbd5e1;padding:8px 6px;'
+                    'font-size:0.78em;border:1px solid #64748b;"></th>'
                 )
                 for cat in BM_CATEGORIES:
                     header_ths += (
-                        f'<th style="background:#0a0f1a;color:#64748b;padding:7px 4px;'
-                        f'font-size:0.7em;font-weight:600;border:1px solid #1e293b;'
-                        f'text-align:center;min-width:108px;">{CAT_DISPLAY[cat]}</th>'
+                        f'<th style="background:#1e293b;color:#e2e8f0;padding:8px 4px;'
+                        f'font-size:0.82em;font-weight:700;border:1px solid #64748b;'
+                        f'text-align:center;">{CAT_SHORT[cat]}</th>'
                     )
                 grid_rows.append(f'<tr>{header_ths}</tr>')
 
                 for s in [1, 2, 3, 4]:
                     stage_th = (
-                        f'<td style="background:#0a0f1a;color:#475569;font-size:0.68em;'
-                        f'font-weight:600;padding:7px 8px;border:1px solid #1e293b;'
+                        f'<td style="background:#1e293b;color:#e2e8f0;font-size:0.82em;'
+                        f'font-weight:700;padding:8px 6px;border:1px solid #64748b;'
                         f'white-space:nowrap;">Stage {s}</td>'
                     )
                     tds = stage_th
@@ -2105,30 +2114,34 @@ def main_dashboard():
                         is_current = (cat == bm_category and s == fh_stage)
                         same_stage = (s == fh_stage and not is_current)
                         same_cat   = (cat == bm_category and not is_current)
+                        # Brighter labels — visible against the dark theme
                         label_line = (
-                            f"{CAT_DISPLAY[cat]}<br>"
-                            f"<span style='font-size:0.82em;opacity:0.6;'>S{s}</span>"
+                            f"{CAT_SHORT[cat]}<br>"
+                            f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span>"
                         )
                         if is_current:
-                            td_style  = ("background:#1b3a5c;border:2px solid #3b82f6;"
-                                         "color:#93c5fd;font-weight:700;")
+                            td_style  = ("background:#1b3a5c;border:2.5px solid #fbbf24;"
+                                         "color:#fde68a;font-weight:700;")
                             content   = (
-                                f"{CAT_DISPLAY[cat]}<br>"
-                                f"<span style='font-size:0.8em;opacity:0.75;'>S{s}</span><br>"
-                                f"<span style='font-size:0.88em;color:#60a5fa;'>▶ {ticker_symbol}</span>"
+                                f"{CAT_SHORT[cat]}<br>"
+                                f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span><br>"
+                                f"<span style='font-size:0.92em;color:#fbbf24;font-weight:700;'>▶ {ticker_symbol}</span>"
                             )
                         elif same_stage:
-                            td_style  = "background:#111827;border:1px solid #1e3a5f;color:#3d5278;"
+                            # Brighter blue text on dim blue background, grey outline
+                            td_style  = "background:#1e293b;border:1px solid #64748b;color:#bfdbfe;"
                             content   = label_line
                         elif same_cat:
-                            td_style  = "background:#0f1f18;border:1px solid #1a3828;color:#2e4d3a;"
+                            # Brighter green text on dim green background, grey outline
+                            td_style  = "background:#1a2e22;border:1px solid #64748b;color:#bbf7d0;"
                             content   = label_line
                         else:
-                            td_style  = "background:#090d14;border:1px solid #131920;color:#1e2d3d;"
+                            # Lighter grey text on very dim background, grey outline
+                            td_style  = "background:#0f172a;border:1px solid #475569;color:#94a3b8;"
                             content   = label_line
                         tds += (
-                            f'<td style="{td_style}padding:9px 4px;text-align:center;'
-                            f'font-size:0.74em;width:20%;">{content}</td>'
+                            f'<td style="{td_style}padding:10px 4px;text-align:center;'
+                            f'font-size:0.82em;width:20%;">{content}</td>'
                         )
                     grid_rows.append(f'<tr>{tds}</tr>')
 
@@ -2139,7 +2152,7 @@ def main_dashboard():
                     + '</table></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("🔵 Current cell  ·  dim blue = same stage  ·  dim green = same category  ·  dark = other")
+                st.caption("🟡 Current cell  ·  blue = same stage  ·  green = same category  ·  grey = other")
 
                 # ── Addition 4: Classification method expander ────────────────
                 with st.expander("🔎 How was this classified?"):
@@ -2242,25 +2255,31 @@ def main_dashboard():
                     ]
 
                     if display_items:
+                        st.caption("🔍 *Hover over each metric label for the formula and plain-English explanation.*")
                         metric_cols = st.columns(min(len(display_items), 4))
                         for idx, (key, value) in enumerate(display_items):
                             label, suffix = METRIC_LABELS[key]
                             col = metric_cols[idx % len(metric_cols)]
-                            try:
-                                if suffix == "%":
-                                    col.metric(label, f"{float(value):.1f}%")
-                                elif suffix == "$B":
-                                    col.metric(label, f"${float(value)/1e9:.1f}B")
-                                else:
-                                    col.metric(label, f"{float(value):.2f}x")
-                            except (TypeError, ValueError):
-                                col.metric(label, str(value))
-                            # Addition 2: source formula + plain-English explanation
+
+                            # Build tooltip text: formula + explanation (renders on hover)
                             src  = METRIC_SOURCES.get(key, "")
                             expl = METRIC_EXPLANATIONS.get(key, "See CLAUDE.md for metric definitions.")
+                            tooltip_parts = []
                             if src:
-                                col.caption(src)
-                            col.caption(expl)
+                                tooltip_parts.append(f"📐 {src}")
+                            if expl:
+                                tooltip_parts.append(f"💡 {expl}")
+                            help_text = "\n\n".join(tooltip_parts) if tooltip_parts else None
+
+                            try:
+                                if suffix == "%":
+                                    col.metric(label, f"{float(value):.1f}%", help=help_text)
+                                elif suffix == "$B":
+                                    col.metric(label, f"${float(value)/1e9:.1f}B", help=help_text)
+                                else:
+                                    col.metric(label, f"{float(value):.2f}x", help=help_text)
+                            except (TypeError, ValueError):
+                                col.metric(label, str(value), help=help_text)
 
                     # RPO qualifier banner (unchanged)
                     rpo_q = val_data.get("rpo_qualifier")
@@ -2281,66 +2300,75 @@ def main_dashboard():
                             f"{spread_str}" + (f" — {rpo_note}" if rpo_note else "")
                         )
 
-                    # Addition 3: Full fair-range table (replaces single caption line)
+                    # Addition 3: Full fair-range reference — visible bordered box, larger text
                     fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
                     if fair_rows:
-                        st.markdown("**📐 Fair-range reference**")
-                        th_s = ("padding:6px 10px;text-align:left;color:#94a3b8;"
-                                "font-size:0.78em;border-bottom:1px solid #334155;")
-                        td_s = ("padding:5px 10px;font-size:0.8em;"
-                                "border-bottom:1px solid #1e293b;color:#cbd5e1;")
+                        th_s = ("padding:14px 18px;text-align:left;color:#fde68a;"
+                                "font-size:1.05em;font-weight:700;"
+                                "border-bottom:2px solid rgba(251,191,36,0.45);"
+                                "background:rgba(251,191,36,0.08);")
+                        td_s = ("padding:13px 18px;font-size:1.02em;font-weight:500;"
+                                "border-bottom:1px solid #334155;color:#f1f5f9;")
                         rows_html = []
                         for (disp_name, val_key, fr_low, fr_high, fr_unit, kind) in fair_rows:
                             cur_raw = val_data.get(val_key)
                             if cur_raw is None:
                                 cur_str      = "—"
-                                verdict_html = f'<span style="color:#475569;">N/A</span>'
+                                verdict_html = f'<span style="color:#64748b;font-weight:600;">N/A</span>'
                             else:
                                 try:
                                     cur_f   = float(cur_raw)
                                     cur_str = f"{cur_f:.1f}{fr_unit}"
                                     if kind == "yield":
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;">✅ Fair</span>'
+                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Fair</span>'
                                         elif cur_f > fr_high:
-                                            verdict_html = '<span style="color:#86efac;">💰 Cheap</span>'
+                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💰 Cheap</span>'
                                         else:
-                                            verdict_html = '<span style="color:#ef4444;">🔴 Rich</span>'
+                                            verdict_html = '<span style="color:#ef4444;font-weight:700;">🔴 Rich</span>'
                                     elif kind == "score":
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;">✅ Good</span>'
+                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Good</span>'
                                         elif cur_f > fr_high:
-                                            verdict_html = '<span style="color:#86efac;">💚 Strong</span>'
+                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💚 Strong</span>'
                                         else:
-                                            verdict_html = '<span style="color:#f59e0b;">⚠️ Weak</span>'
+                                            verdict_html = '<span style="color:#f59e0b;font-weight:700;">⚠️ Weak</span>'
                                     else:  # multiple
                                         if fr_low <= cur_f <= fr_high:
-                                            verdict_html = '<span style="color:#22c55e;">✅ Fair</span>'
+                                            verdict_html = '<span style="color:#22c55e;font-weight:700;">✅ Fair</span>'
                                         elif cur_f < fr_low:
-                                            verdict_html = '<span style="color:#86efac;">💰 Cheap</span>'
+                                            verdict_html = '<span style="color:#86efac;font-weight:700;">💰 Cheap</span>'
                                         else:
-                                            verdict_html = '<span style="color:#ef4444;">🔴 Rich</span>'
+                                            verdict_html = '<span style="color:#ef4444;font-weight:700;">🔴 Rich</span>'
                                 except (TypeError, ValueError):
                                     cur_str      = str(cur_raw)
-                                    verdict_html = '<span style="color:#475569;">—</span>'
+                                    verdict_html = '<span style="color:#64748b;">—</span>'
                             rows_html.append(
                                 f'<tr>'
-                                f'<td style="{td_s}">{disp_name}</td>'
+                                f'<td style="{td_s}font-weight:600;">{disp_name}</td>'
                                 f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}{fr_unit}</td>'
-                                f'<td style="{td_s}text-align:center;">{cur_str}</td>'
+                                f'<td style="{td_s}text-align:center;font-weight:700;color:#fbbf24;">{cur_str}</td>'
                                 f'<td style="{td_s}text-align:center;">{verdict_html}</td>'
                                 f'</tr>'
                             )
                         st.markdown(
-                            f'<table style="border-collapse:collapse;width:100%;">'
-                            f'<thead><tr>'
+                            '<div style="background:rgba(15,23,42,0.6);'
+                            'border:2px solid rgba(251,191,36,0.35);'
+                            'border-radius:12px;padding:6px;margin:18px 0 8px 0;'
+                            'box-shadow:0 4px 14px rgba(0,0,0,0.3);">'
+                            '<div style="font-size:1.3em;font-weight:800;color:#fbbf24;'
+                            f'padding:14px 18px 8px 18px;font-family:Times New Roman,Times,serif;">'
+                            f'📐 Fair-Range Reference — {matrix_cell}'
+                            '</div>'
+                            '<table style="border-collapse:collapse;width:100%;">'
+                            '<thead><tr>'
                             f'<th style="{th_s}">Metric</th>'
                             f'<th style="{th_s}text-align:center;">Fair Range</th>'
                             f'<th style="{th_s}text-align:center;">Current</th>'
                             f'<th style="{th_s}text-align:center;">Verdict</th>'
-                            f'</tr></thead><tbody>'
+                            '</tr></thead><tbody>'
                             + "".join(rows_html)
-                            + '</tbody></table>',
+                            + '</tbody></table></div>',
                             unsafe_allow_html=True,
                         )
 
@@ -2431,15 +2459,6 @@ def main_dashboard():
                     st.write(f"Other tickers classified as **{matrix_cell}**: `{'` · `'.join(peers)}`")
                 else:
                     st.write("No other classified tickers in this matrix cell yet.")
-
-                st.markdown("---")
-
-                # ── Row 4: Classification rationale (unchanged) ───────────────
-                st.subheader("🧠 Classification Rationale")
-                if bm_llm_rationale:
-                    st.write(bm_llm_rationale)
-                else:
-                    st.write("Classification derived from quantitative signals (no LLM rationale recorded).")
 
                 st.markdown("---")
 
