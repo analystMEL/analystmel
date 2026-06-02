@@ -1074,7 +1074,16 @@ def main_dashboard():
             border: 1px solid #6fffe9;
             box-shadow: 0 0 10px rgba(111, 255, 233, 0.3);
         }
-        
+
+        /* --- BM-tab "assigned category" highlight (gold underline)  --- */
+        .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] {
+            border-bottom: 3px solid #fbbf24 !important;
+        }
+        .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] p {
+            color: #fde68a !important;
+            font-weight: 700 !important;
+        }
+
         /* --- Timeline Styling --- */
         .timeline-item {
             border-left: 3px solid #6fffe9;
@@ -1952,6 +1961,32 @@ def main_dashboard():
             "consumer_internet": "Consumer Internet",
             "deep_tech":         "Deep Tech",
         }
+        # Plain-English one-paragraph description per BM category — shown inside Section 5 tabs.
+        BM_DESCRIPTIONS = {
+            "hyperscale":
+                "A cloud-infrastructure operator that owns physical data centres and earns "
+                "usage-based revenue from compute, storage, and AI services. CapEx-heavy, with "
+                "services revenue typically above 25% of total. Valuation anchors: CapEx-adjusted "
+                "EV/EBIT and PEG.",
+            "saas":
+                "A pure software business that charges customers a recurring subscription fee "
+                "with no physical product. Asset-light, with high gross margins, low CapEx, and "
+                "predictable revenue. Valuation anchors range from EV/NTM ARR (early stage) to "
+                "EV/FCF and FCF Yield (mature).",
+            "semi_hardware":
+                "Designs or manufactures physical semiconductors, equipment, or hardware "
+                "components. Revenue is cyclical, tied to industry capital-spending cycles. "
+                "Valuation anchors: Cycle-adjusted P/E (mature) and EV/NTM Revenue (early stage).",
+            "consumer_internet":
+                "A consumer-facing digital platform — social network, marketplace, streaming "
+                "service, or app — monetised through advertising, transactions, or subscriptions. "
+                "Valuation anchors: EV/EBITDA (mature) or EV/NTM Revenue (growth stage).",
+            "deep_tech":
+                "A frontier-technology company (quantum, photonics, aerospace, biotech-adjacent) "
+                "where commercial revenue lags scientific or intellectual-property value. Often "
+                "pre-profit and R&D-heavy. Valuation anchors: P/S (Stage 1), EV/NTM Revenue "
+                "(Stage 2), EV/Gross Profit (Stage 3+).",
+        }
         STAGE_LABELS = {
             1: "Stage 1 — Pre-revenue / speculative",
             2: "Stage 2 — Growth / scaling",
@@ -2157,16 +2192,7 @@ def main_dashboard():
 
                 stage_label = STAGE_LABELS.get(fh_stage, f"Stage {fh_stage}")
 
-                # ── Row 1: Classification badges (unchanged) ──────────────────
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Business Model", bm_category.replace("_", " ").title())
-                c2.metric("FH Stage", f"Stage {fh_stage}")
-                c3.metric("Matrix Cell", matrix_cell)
-                c4.metric("Confidence", bm_confidence or "—")
-
-                st.caption(f"**{stage_label}**")
-
-                # ── Addition 1: Matrix position visualiser ────────────────────
+                # ── Section 3: Matrix 5×4 position visualiser ─────────────────
                 # Short labels (fit narrow screens — no horizontal scroll)
                 CAT_SHORT = {
                     "hyperscale":        "Hyperscale",
@@ -2240,9 +2266,124 @@ def main_dashboard():
                 )
                 st.caption("🟡 Current cell  ·  blue = same stage  ·  green = same category  ·  grey = other")
 
-                # ── Addition 4: Classification method expander ────────────────
-                with st.expander("🔎 How was this classified?"):
-                    st.markdown("**Business Model**")
+                st.markdown("---")
+
+                # ── Section 4: Financial Health diagnosis (MAIN visible section) ─
+                st.subheader(f"🩺 Financial Health: Stage {fh_stage} — {stage_label.split('— ', 1)[-1]}")
+                st.caption(
+                    f"Weighted score **{fh_weighted_score:.2f}** · "
+                    f"Classification confidence **{bm_confidence or '—'}**"
+                )
+
+                # Always-visible sub-score table
+                _fh_sub_scores = {
+                    "FCF Margin (adj)": fh_fcf_stage,
+                    "Gross Margin":     fh_gm_stage,
+                    "Cash Runway":      fh_runway_stage,
+                    "Op. Leverage":     fh_oplev_stage,
+                    "SBC % Rev":        fh_sbc_stage,
+                    "D/E Ratio":        fh_de_stage,
+                    "ROIC":             fh_roic_stage,
+                }
+                _weights_ui = FH_STAGE_WEIGHTS_UI.get(fh_stage, FH_STAGE_WEIGHTS_UI[3])
+                _fh_table_rows = []
+                for _m_name, _sub_score in _fh_sub_scores.items():
+                    _w = _weights_ui.get(_m_name, 0)
+                    _contrib = round(_w * _sub_score, 3) if _w > 0 else None
+                    _fh_table_rows.append({
+                        "Metric":       _m_name,
+                        "Sub-score":    _sub_score,
+                        "Weight":       f"{_w:.0%}" if _w > 0 else "—",
+                        "Contribution": f"{_contrib:.3f}" if _contrib is not None else "—",
+                    })
+                _fh_table_rows.append({
+                    "Metric":       "Weighted total",
+                    "Sub-score":    "—",
+                    "Weight":       "—",
+                    "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
+                })
+                st.dataframe(pd.DataFrame(_fh_table_rows), use_container_width=True, hide_index=True)
+
+                # Always-visible FCF hard-cap status banner
+                if fh_fcf_hard_cap:
+                    st.warning("⚠️ FCF hard-cap applied: negative FCF margin capped the stage at Stage 2 regardless of other sub-scores.")
+                else:
+                    st.success("✅ FCF hard-cap not applied.")
+
+                # Small expander — methodology + weighting breakdown only
+                with st.expander("🔎 How was this calculated?"):
+                    st.markdown(
+                        "The stage is a **weighted average of seven sub-scores** (each 1–4), "
+                        "where the weights themselves vary by stage to reflect what matters most "
+                        "at each phase. Stage 1 emphasises survival metrics (runway, FCF); Stage 4 "
+                        "emphasises efficiency and capital allocation (ROIC, D/E)."
+                    )
+                    _weight_str = " · ".join(
+                        f"**{_m}**: {_w:.0%}"
+                        for _m, _w in _weights_ui.items()
+                        if _w > 0
+                    )
+                    st.markdown(f"**Stage {fh_stage} weights →** {_weight_str}")
+
+                st.markdown("---")
+
+                # ── Section 5: Business Model 5-tab explainer ─────────────────
+                _bm_display_now = CAT_DISPLAY.get(bm_category, bm_category.title())
+                st.subheader(f"🧬 Business Model: {_bm_display_now}")
+                st.caption(
+                    f"Your ticker is classified as **{_bm_display_now}** — Stage {fh_stage}. "
+                    "The assigned category's tab is highlighted; click other tabs to see what "
+                    "each business model means."
+                )
+
+                _bm_tab_labels = [CAT_DISPLAY[c] for c in BM_CATEGORIES]
+                _bm_tabs = st.tabs(_bm_tab_labels)
+                for _i, _cat in enumerate(BM_CATEGORIES):
+                    with _bm_tabs[_i]:
+                        st.markdown(BM_DESCRIPTIONS.get(_cat, ""))
+                        if _cat == bm_category:
+                            st.success(
+                                f"✓ **{ticker_symbol}** is classified here — "
+                                f"Matrix Cell `{matrix_cell}` (Stage {fh_stage})."
+                            )
+
+                # Auto-select the assigned tab + apply the gold-underline highlight.
+                # st.tabs has no programmatic selection API, so click it via a one-shot
+                # JS snippet and tag it with data-valoura-assigned for the CSS rule.
+                _assigned_label = CAT_DISPLAY[bm_category]
+                st.markdown(
+                    f"""
+                    <script>
+                    (function() {{
+                        const target = "{_assigned_label}";
+                        const tagged = window.__valoura_bm_tagged || {{}};
+                        if (tagged[target]) return;
+                        const ticker_state = "{ticker_symbol}|{matrix_cell}";
+                        if (tagged.__last === ticker_state) return;
+                        tagged.__last = ticker_state;
+                        window.__valoura_bm_tagged = tagged;
+                        setTimeout(function() {{
+                            document.querySelectorAll('button[data-baseweb="tab"]').forEach(function(tab) {{
+                                tab.removeAttribute('data-valoura-assigned');
+                                const txt = (tab.textContent || '').trim();
+                                if (txt === target) {{
+                                    tab.setAttribute('data-valoura-assigned', 'true');
+                                    if (tab.getAttribute('aria-selected') !== 'true') {{
+                                        tab.click();
+                                    }}
+                                }}
+                            }});
+                        }}, 120);
+                    }})();
+                    </script>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("---")
+
+                # ── Section 6: "How was the Business Model decided?" expander ──
+                with st.expander("🔎 How was the Business Model decided?"):
                     try:
                         trace      = json.loads(bm_decision_trace_str) if bm_decision_trace_str else {}
                         validators = json.loads(bm_validators_str)      if bm_validators_str     else []
@@ -2276,42 +2417,6 @@ def main_dashboard():
                                 "Rationale": v.get("rationale", "—"),
                             })
                         st.dataframe(pd.DataFrame(val_rows_display), use_container_width=True, hide_index=True)
-
-                    st.markdown("---")
-                    st.markdown("**Financial Health Stage Breakdown**")
-
-                    fh_sub_scores = {
-                        "FCF Margin (adj)": fh_fcf_stage,
-                        "Gross Margin":     fh_gm_stage,
-                        "Cash Runway":      fh_runway_stage,
-                        "Op. Leverage":     fh_oplev_stage,
-                        "SBC % Rev":        fh_sbc_stage,
-                        "D/E Ratio":        fh_de_stage,
-                        "ROIC":             fh_roic_stage,
-                    }
-                    weights_ui = FH_STAGE_WEIGHTS_UI.get(fh_stage, FH_STAGE_WEIGHTS_UI[3])
-                    fh_table_rows = []
-                    for m_name, sub_score in fh_sub_scores.items():
-                        w = weights_ui.get(m_name, 0)
-                        contrib = round(w * sub_score, 3) if w > 0 else None
-                        fh_table_rows.append({
-                            "Metric":       m_name,
-                            "Sub-score":    sub_score,
-                            "Weight":       f"{w:.0%}" if w > 0 else "—",
-                            "Contribution": f"{contrib:.3f}" if contrib is not None else "—",
-                        })
-                    fh_table_rows.append({
-                        "Metric":       "Weighted total",
-                        "Sub-score":    "—",
-                        "Weight":       "—",
-                        "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
-                    })
-                    st.dataframe(pd.DataFrame(fh_table_rows), use_container_width=True, hide_index=True)
-
-                    if fh_fcf_hard_cap:
-                        st.warning("⚠️ FCF hard-cap applied: negative FCF margin capped the stage at Stage 2 regardless of other sub-scores.")
-                    else:
-                        st.success("✅ FCF hard-cap not applied.")
 
                     if bm_method == "llm_tiebreaker":
                         st.info("🤖 LLM was invoked to break a validator tie.")
@@ -2465,46 +2570,50 @@ def main_dashboard():
 
                     st.markdown("---")
 
-                # ── Sector Peers — same business model (any stage) ────────────
-                _bm_label = bm_category.replace("_", " ").title()
-                st.subheader(f"🏢 Sector Peers — {_bm_label}")
+                # ── Section 10: Compare to Industry table ─────────────────────
+                # (Replaces both the old Sector Peers + Matrix Cell Peers blocks)
+                # BM = first priority, FH stage proximity = second priority.
+                _bm_label = CAT_DISPLAY.get(bm_category, bm_category.replace("_", " ").title())
+                st.subheader(f"🏢 Compare to Industry — {_bm_label}")
                 st.caption(
-                    f"All tickers classified as **{bm_category}**, regardless of stage. "
-                    "Shows how {} stacks up on the four core fundamentals.".format(ticker_symbol)
+                    f"All tickers classified as **{_bm_label}**, prioritised by stage "
+                    f"proximity to **{ticker_symbol}** (Stage {fh_stage}). "
+                    f"Same-stage peers appear first."
                 )
 
-                _sector_rows = conn_vb.execute(
+                _peer_rows_raw = conn_vb.execute(
                     """
-                    SELECT c.ticker, c.matrix_cell,
+                    SELECT c.ticker, c.matrix_cell, c.fh_stage,
                            m.fcf_margin_adj, m.gross_margin,
                            m.revenue_growth_yoy, m.operating_leverage
                     FROM classifications c
                     LEFT JOIN computed_metrics m ON c.ticker = m.ticker
                     WHERE c.bm_category = ?
-                    ORDER BY c.ticker
+                    ORDER BY ABS(c.fh_stage - ?) ASC, c.ticker ASC
                     """,
-                    (bm_category,),
+                    (bm_category, fh_stage),
                 ).fetchall()
 
-                if len(_sector_rows) > 1:
+                if len(_peer_rows_raw) > 1:
                     _peer_records = [
                         {
                             "Ticker":           r[0],
-                            "Cell":             r[1],
-                            "FCF Margin (adj)": r[2],
-                            "Gross Margin":     r[3],
-                            "Rev Growth YoY":   r[4],
-                            "Op Leverage":      r[5],
+                            "Matrix Cell":      r[1],
+                            "FH Stage":         r[2],
+                            "FCF Margin (adj)": r[3],
+                            "Gross Margin":     r[4],
+                            "Rev Growth YoY":   r[5],
+                            "Op Leverage":      r[6],
                         }
-                        for r in _sector_rows
+                        for r in _peer_rows_raw
                     ]
                     _peer_df = pd.DataFrame(_peer_records)
 
                     # Compute medians (excluding None) before formatting
-                    _med_fcf  = _peer_df["FCF Margin (adj)"].median()
-                    _med_gm   = _peer_df["Gross Margin"].median()
-                    _med_rg   = _peer_df["Rev Growth YoY"].median()
-                    _med_opl  = _peer_df["Op Leverage"].median()
+                    _med_fcf = _peer_df["FCF Margin (adj)"].median()
+                    _med_gm  = _peer_df["Gross Margin"].median()
+                    _med_rg  = _peer_df["Rev Growth YoY"].median()
+                    _med_opl = _peer_df["Op Leverage"].median()
 
                     def _fmt_pct(v):
                         return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
@@ -2512,10 +2621,11 @@ def main_dashboard():
                         return "—" if v is None or pd.isna(v) else f"{float(v):.1f}pp"
 
                     _display_df = _peer_df.copy()
+                    _display_df["FH Stage"]         = _display_df["FH Stage"].apply(lambda v: f"Stage {int(v)}" if pd.notna(v) else "—")
                     _display_df["FCF Margin (adj)"] = _display_df["FCF Margin (adj)"].apply(_fmt_pct)
-                    _display_df["Gross Margin"]    = _display_df["Gross Margin"].apply(_fmt_pct)
-                    _display_df["Rev Growth YoY"]  = _display_df["Rev Growth YoY"].apply(_fmt_pct)
-                    _display_df["Op Leverage"]     = _display_df["Op Leverage"].apply(_fmt_pp)
+                    _display_df["Gross Margin"]     = _display_df["Gross Margin"].apply(_fmt_pct)
+                    _display_df["Rev Growth YoY"]   = _display_df["Rev Growth YoY"].apply(_fmt_pct)
+                    _display_df["Op Leverage"]      = _display_df["Op Leverage"].apply(_fmt_pp)
 
                     _styled = _display_df.style.apply(
                         lambda row: [
@@ -2535,21 +2645,6 @@ def main_dashboard():
                     )
                 else:
                     st.write(f"No other **{_bm_label}** tickers in the universe yet — {ticker_symbol} is the only one classified so far.")
-
-                st.markdown("---")
-
-                # ── Row 3: Matrix-cell peers (narrower — same stage too) ──────
-                st.subheader("🔍 Matrix Cell Peers")
-                peer_rows = conn_vb.execute(
-                    "SELECT ticker FROM classifications WHERE matrix_cell=? AND ticker!=? ORDER BY ticker",
-                    (matrix_cell, ticker_symbol)
-                ).fetchall()
-                peers = [r[0] for r in peer_rows]
-
-                if peers:
-                    st.write(f"Other tickers classified as **{matrix_cell}**: `{'` · `'.join(peers)}`")
-                else:
-                    st.write("No other classified tickers in this matrix cell yet.")
 
                 st.markdown("---")
 
