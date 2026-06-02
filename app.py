@@ -1075,6 +1075,16 @@ def main_dashboard():
             box-shadow: 0 0 10px rgba(111, 255, 233, 0.3);
         }
 
+        /* --- Centered + spread-across tab layout (applies app-wide) --- */
+        .stTabs [data-baseweb="tab-list"] {
+            justify-content: space-around !important;
+            width: 100% !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            flex: 1 !important;
+            text-align: center !important;
+        }
+
         /* --- BM-tab "assigned category" highlight (gold underline)  --- */
         .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] {
             border-bottom: 3px solid #fbbf24 !important;
@@ -2336,7 +2346,10 @@ def main_dashboard():
                     "each business model means."
                 )
 
-                _bm_tab_labels = [CAT_DISPLAY[c] for c in BM_CATEGORIES]
+                # Tab labels carry the ⓘ glyph as a hover hint — the OS-native
+                # tooltip (title= attribute) is injected via JS below using
+                # BM_DESCRIPTIONS.
+                _bm_tab_labels = [f"{CAT_DISPLAY[c]} ⓘ" for c in BM_CATEGORIES]
                 _bm_tabs = st.tabs(_bm_tab_labels)
                 for _i, _cat in enumerate(BM_CATEGORIES):
                     with _bm_tabs[_i]:
@@ -2347,25 +2360,37 @@ def main_dashboard():
                                 f"Matrix Cell `{matrix_cell}` (Stage {fh_stage})."
                             )
 
-                # Auto-select the assigned tab + apply the gold-underline highlight.
-                # st.tabs has no programmatic selection API, so click it via a one-shot
-                # JS snippet and tag it with data-valoura-assigned for the CSS rule.
-                _assigned_label = CAT_DISPLAY[bm_category]
+                # Auto-select the assigned tab + apply the gold-underline highlight
+                # + set browser-native `title=` tooltip on every BM tab using
+                # BM_DESCRIPTIONS so users get the definition on hover.
+                # st.tabs has no programmatic selection API, so we do it via JS.
+                import json as _json
+                _assigned_label_full = f"{CAT_DISPLAY[bm_category]} ⓘ"
+                _bm_tooltip_map = {
+                    f"{CAT_DISPLAY[_c]} ⓘ": BM_DESCRIPTIONS.get(_c, "")
+                    for _c in BM_CATEGORIES
+                }
+                _tooltip_json = _json.dumps(_bm_tooltip_map)
                 st.markdown(
                     f"""
                     <script>
                     (function() {{
-                        const target = "{_assigned_label}";
+                        const target = {_json.dumps(_assigned_label_full)};
+                        const tooltips = {_tooltip_json};
                         const tagged = window.__valoura_bm_tagged || {{}};
-                        if (tagged[target]) return;
-                        const ticker_state = "{ticker_symbol}|{matrix_cell}";
-                        if (tagged.__last === ticker_state) return;
+                        const ticker_state = {_json.dumps(f"{ticker_symbol}|{matrix_cell}")};
+                        if (tagged.__last === ticker_state && tagged.__tooltipped) return;
                         tagged.__last = ticker_state;
+                        tagged.__tooltipped = true;
                         window.__valoura_bm_tagged = tagged;
                         setTimeout(function() {{
                             document.querySelectorAll('button[data-baseweb="tab"]').forEach(function(tab) {{
                                 tab.removeAttribute('data-valoura-assigned');
                                 const txt = (tab.textContent || '').trim();
+                                // Set native tooltip if this tab is one of our BM tabs
+                                if (tooltips.hasOwnProperty(txt)) {{
+                                    tab.setAttribute('title', tooltips[txt]);
+                                }}
                                 if (txt === target) {{
                                     tab.setAttribute('data-valoura-assigned', 'true');
                                     if (tab.getAttribute('aria-selected') !== 'true') {{
@@ -2571,63 +2596,142 @@ def main_dashboard():
                     st.markdown("---")
 
                 # ── Section 10: Compare to Industry table ─────────────────────
-                # (Replaces both the old Sector Peers + Matrix Cell Peers blocks)
-                # BM = first priority, FH stage proximity = second priority.
+                # Dual mode:
+                #   Mode A: ≥3 tickers in same matrix_cell → show that cell's
+                #           primary metric for each peer + Good/Fair/Poor verdict
+                #   Mode B: <3 in cell → broaden to same bm_category and show
+                #           3–4 BM-relevant multiples side-by-side
                 _bm_label = CAT_DISPLAY.get(bm_category, bm_category.replace("_", " ").title())
+
+                # BM-relevant multiples (Mode B columns)
+                BM_COMPARE_COLS = {
+                    "hyperscale": [
+                        ("capex_adj_ev_ebit", "CapEx EV/EBIT", "x"),
+                        ("peg_ratio",          "PEG",           "x"),
+                        ("ev_ebitda",          "EV/EBITDA",     "x"),
+                        ("rule_of_40",         "Rule of 40",    "%"),
+                    ],
+                    "saas": [
+                        ("ev_ntm_arr",         "EV/NTM ARR",    "x"),
+                        ("ev_fcf",             "EV/FCF",        "x"),
+                        ("peg_ratio",          "PEG",           "x"),
+                        ("rule_of_40",         "Rule of 40",    "%"),
+                    ],
+                    "semi_hardware": [
+                        ("cycle_adj_pe",       "Cycle P/E",     "x"),
+                        ("peg_ratio",          "PEG",           "x"),
+                        ("ev_ebitda",          "EV/EBITDA",     "x"),
+                        ("rule_of_40",         "Rule of 40",    "%"),
+                    ],
+                    "consumer_internet": [
+                        ("ev_ebitda",          "EV/EBITDA",     "x"),
+                        ("peg_ratio",          "PEG",           "x"),
+                        ("pe_ratio",           "P/E",           "x"),
+                        ("rule_of_40",         "Rule of 40",    "%"),
+                    ],
+                    "deep_tech": [
+                        ("ps_ratio",           "P/S",           "x"),
+                        ("ev_gross_profit",    "EV/GP",         "x"),
+                        ("ev_ntm_arr",         "EV/NTM Rev",    "x"),
+                        ("rule_of_40",         "Rule of 40",    "%"),
+                    ],
+                }
+
+                # Shared formatters
+                def _fmt_pct(v):
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
+                def _fmt_pp(v):
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}pp"
+                def _fmt_x(v):
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.2f}x"
+                def _fmt_unit(v, unit):
+                    if v is None or pd.isna(v):
+                        return "—"
+                    if unit == "%":
+                        return f"{float(v):.1f}%"
+                    return f"{float(v):.2f}x"
+
+                # How many tickers share the current matrix_cell?
+                _cell_count = conn_vb.execute(
+                    "SELECT COUNT(*) FROM classifications WHERE matrix_cell = ?", (matrix_cell,)
+                ).fetchone()[0]
+
+                _MODE_A_THRESHOLD = 3
+
                 st.subheader(f"🏢 Compare to Industry — {_bm_label}")
-                st.caption(
-                    f"All tickers classified as **{_bm_label}**, prioritised by stage "
-                    f"proximity to **{ticker_symbol}** (Stage {fh_stage}). "
-                    f"Same-stage peers appear first."
-                )
 
-                _peer_rows_raw = conn_vb.execute(
-                    """
-                    SELECT c.ticker, c.matrix_cell, c.fh_stage,
-                           m.fcf_margin_adj, m.gross_margin,
-                           m.revenue_growth_yoy, m.operating_leverage
-                    FROM classifications c
-                    LEFT JOIN computed_metrics m ON c.ticker = m.ticker
-                    WHERE c.bm_category = ?
-                    ORDER BY ABS(c.fh_stage - ?) ASC, c.ticker ASC
-                    """,
-                    (bm_category, fh_stage),
-                ).fetchall()
+                if _cell_count >= _MODE_A_THRESHOLD:
+                    # ── MODE A: same matrix cell, value on cell's primary metric ──
+                    _fair_rows_for_cell = FAIR_RANGES_FULL.get(matrix_cell, [])
+                    if _fair_rows_for_cell:
+                        _disp_name, _val_key, _lo, _hi, _u, _kind = _fair_rows_for_cell[0]
+                    else:
+                        _disp_name, _val_key, _lo, _hi, _u, _kind = ("Primary", None, None, None, "x", "multiple")
 
-                if len(_peer_rows_raw) > 1:
-                    _peer_records = [
-                        {
+                    # Get cell's primary method (consistent across cell)
+                    _pm_row = conn_vb.execute(
+                        "SELECT primary_method FROM valuations WHERE matrix_cell = ? LIMIT 1",
+                        (matrix_cell,)
+                    ).fetchone()
+                    _primary_method = _pm_row[0] if _pm_row else "—"
+
+                    st.caption(
+                        f"All tickers in matrix cell **{matrix_cell}** — valued on the "
+                        f"cell's primary method ({_primary_method})."
+                    )
+
+                    _select_cols = (
+                        "c.ticker, c.fh_stage, "
+                        "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
+                        f"v.{_val_key} AS primary_val" if _val_key else
+                        "c.ticker, c.fh_stage, "
+                        "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
+                        "NULL AS primary_val"
+                    )
+                    _peer_rows_raw = conn_vb.execute(
+                        f"""
+                        SELECT {_select_cols}
+                        FROM classifications c
+                        LEFT JOIN computed_metrics m ON c.ticker = m.ticker
+                        LEFT JOIN valuations v ON c.ticker = v.ticker
+                        WHERE c.matrix_cell = ?
+                        ORDER BY c.ticker ASC
+                        """,
+                        (matrix_cell,),
+                    ).fetchall()
+
+                    def _verdict_html(cv, lo, hi, kind):
+                        if cv is None or pd.isna(cv) or lo is None or hi is None:
+                            return ""
+                        try:
+                            cvf = float(cv)
+                        except (TypeError, ValueError):
+                            return ""
+                        if kind == "yield":
+                            if lo <= cvf <= hi: return "⚖️ Fair"
+                            return "✅ Good" if cvf > hi else "🔴 Poor"
+                        if kind == "score":
+                            if lo <= cvf <= hi: return "⚖️ Fair"
+                            return "✅ Good" if cvf > hi else "🔴 Poor"
+                        # multiple
+                        if lo <= cvf <= hi: return "⚖️ Fair"
+                        return "✅ Good" if cvf < lo else "🔴 Poor"
+
+                    _peer_records = []
+                    for r in _peer_rows_raw:
+                        _peer_records.append({
                             "Ticker":           r[0],
-                            "Matrix Cell":      r[1],
-                            "FH Stage":         r[2],
-                            "FCF Margin (adj)": r[3],
-                            "Gross Margin":     r[4],
-                            "Rev Growth YoY":   r[5],
-                            "Op Leverage":      r[6],
-                        }
-                        for r in _peer_rows_raw
-                    ]
+                            "FH Stage":         f"Stage {int(r[1])}" if r[1] is not None else "—",
+                            "FCF Margin (adj)": _fmt_pct(r[2]),
+                            "Gross Margin":     _fmt_pct(r[3]),
+                            "Rev Growth YoY":   _fmt_pct(r[4]),
+                            "Op Leverage":      _fmt_pp(r[5]),
+                            _disp_name:         _fmt_unit(r[6], _u),
+                            "Verdict":          _verdict_html(r[6], _lo, _hi, _kind),
+                        })
                     _peer_df = pd.DataFrame(_peer_records)
 
-                    # Compute medians (excluding None) before formatting
-                    _med_fcf = _peer_df["FCF Margin (adj)"].median()
-                    _med_gm  = _peer_df["Gross Margin"].median()
-                    _med_rg  = _peer_df["Rev Growth YoY"].median()
-                    _med_opl = _peer_df["Op Leverage"].median()
-
-                    def _fmt_pct(v):
-                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
-                    def _fmt_pp(v):
-                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}pp"
-
-                    _display_df = _peer_df.copy()
-                    _display_df["FH Stage"]         = _display_df["FH Stage"].apply(lambda v: f"Stage {int(v)}" if pd.notna(v) else "—")
-                    _display_df["FCF Margin (adj)"] = _display_df["FCF Margin (adj)"].apply(_fmt_pct)
-                    _display_df["Gross Margin"]     = _display_df["Gross Margin"].apply(_fmt_pct)
-                    _display_df["Rev Growth YoY"]   = _display_df["Rev Growth YoY"].apply(_fmt_pct)
-                    _display_df["Op Leverage"]      = _display_df["Op Leverage"].apply(_fmt_pp)
-
-                    _styled = _display_df.style.apply(
+                    _styled = _peer_df.style.apply(
                         lambda row: [
                             'background-color: rgba(251,191,36,0.22); color: #0f172a; font-weight: 700;'
                             if row["Ticker"] == ticker_symbol else ''
@@ -2637,14 +2741,75 @@ def main_dashboard():
                     )
                     st.dataframe(_styled, use_container_width=True, hide_index=True)
                     st.caption(
-                        f"**Sector median ({len(_peer_df)} {_bm_label} tickers):**  "
-                        f"FCF {_fmt_pct(_med_fcf)} · "
-                        f"GM {_fmt_pct(_med_gm)} · "
-                        f"RevG {_fmt_pct(_med_rg)} · "
-                        f"OpLev {_fmt_pp(_med_opl)}"
+                        f"Fair range for **{_disp_name}** in {matrix_cell}: {_lo}–{_hi}{_u}. "
+                        f"Verdict = Good / Fair / Poor based on each peer's position vs that range."
                     )
-                else:
-                    st.write(f"No other **{_bm_label}** tickers in the universe yet — {ticker_symbol} is the only one classified so far.")
+
+                elif _cell_count < _MODE_A_THRESHOLD:
+                    # ── MODE B: broaden to same BM, show BM-relevant multiples ──
+                    _bm_cols = BM_COMPARE_COLS.get(bm_category, [
+                        ("ev_ebitda", "EV/EBITDA", "x"),
+                        ("peg_ratio", "PEG",       "x"),
+                        ("ev_fcf",    "EV/FCF",    "x"),
+                        ("rule_of_40","Rule of 40","%"),
+                    ])
+                    st.caption(
+                        f"Only **{_cell_count}** ticker(s) in matrix cell `{matrix_cell}` — "
+                        f"broadened to all **{_bm_label}** peers. Columns show the most "
+                        f"relevant valuation multiples for this BM."
+                    )
+
+                    _val_cols_sql = ", ".join(f"v.{k}" for (k, _, _) in _bm_cols)
+                    _peer_rows_raw = conn_vb.execute(
+                        f"""
+                        SELECT c.ticker, c.matrix_cell, c.fh_stage,
+                               m.fcf_margin_adj, m.gross_margin,
+                               m.revenue_growth_yoy, m.operating_leverage,
+                               {_val_cols_sql}
+                        FROM classifications c
+                        LEFT JOIN computed_metrics m ON c.ticker = m.ticker
+                        LEFT JOIN valuations v ON c.ticker = v.ticker
+                        WHERE c.bm_category = ?
+                        ORDER BY ABS(c.fh_stage - ?) ASC, c.ticker ASC
+                        """,
+                        (bm_category, fh_stage),
+                    ).fetchall()
+
+                    if len(_peer_rows_raw) > 1:
+                        _peer_records = []
+                        for r in _peer_rows_raw:
+                            row = {
+                                "Ticker":           r[0],
+                                "Matrix Cell":      r[1],
+                                "FH Stage":         f"Stage {int(r[2])}" if r[2] is not None else "—",
+                                "FCF Margin (adj)": _fmt_pct(r[3]),
+                                "Gross Margin":     _fmt_pct(r[4]),
+                                "Rev Growth YoY":   _fmt_pct(r[5]),
+                                "Op Leverage":      _fmt_pp(r[6]),
+                            }
+                            for _i, (_k, _label, _u) in enumerate(_bm_cols):
+                                row[_label] = _fmt_unit(r[7 + _i], _u)
+                            _peer_records.append(row)
+                        _peer_df = pd.DataFrame(_peer_records)
+
+                        _styled = _peer_df.style.apply(
+                            lambda row: [
+                                'background-color: rgba(251,191,36,0.22); color: #0f172a; font-weight: 700;'
+                                if row["Ticker"] == ticker_symbol else ''
+                                for _ in row
+                            ],
+                            axis=1,
+                        )
+                        st.dataframe(_styled, use_container_width=True, hide_index=True)
+                        st.caption(
+                            f"Showing {len(_peer_df)} **{_bm_label}** tickers. "
+                            f"Same-stage peers grouped first."
+                        )
+                    else:
+                        st.write(
+                            f"No other **{_bm_label}** tickers in the universe yet — "
+                            f"{ticker_symbol} is the only one classified so far."
+                        )
 
                 st.markdown("---")
 
