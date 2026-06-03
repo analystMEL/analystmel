@@ -2337,6 +2337,98 @@ def main_dashboard():
 
                 st.markdown("---")
 
+                # ── Section 4b: Financial Health Trajectory ───────────────────
+                st.subheader("Financial Health Trajectory")
+                _traj_rows = conn_vb.execute(
+                    "SELECT as_of_date, fh_stage, fh_weighted_score "
+                    "FROM fh_stage_history "
+                    "WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 8",
+                    (ticker_symbol,),
+                ).fetchall()
+
+                if not _traj_rows:
+                    st.info(
+                        f"No historical FH stages recorded for **{ticker_symbol}** yet. "
+                        "Run `python3 backfill_fh_history.py` (zero AV credits) to populate the last 8 quarters."
+                    )
+                else:
+                    # Reverse to chronological order (oldest → newest)
+                    _traj = list(reversed(_traj_rows))
+
+                    # Helper: format YYYY-MM-DD to Q-label (e.g. "2024-12-31" → "Q4 2024")
+                    def _q_label(date_str):
+                        try:
+                            y, m, _ = date_str.split("-")
+                            q = (int(m) - 1) // 3 + 1
+                            return f"Q{q} {y}"
+                        except Exception:
+                            return date_str
+
+                    # Per-stage colour palette (matches the matrix grid scheme)
+                    _stage_colour = {
+                        1: "#ef4444",  # red — pre-revenue / speculative
+                        2: "#f59e0b",  # amber — growth / scaling
+                        3: "#3b82f6",  # blue — mature growth
+                        4: "#22c55e",  # green — cash generation
+                    }
+                    _stage_label = {
+                        1: "Pre-revenue",
+                        2: "Growth",
+                        3: "Mature",
+                        4: "FCF",
+                    }
+
+                    # Build the inline timeline as a single HTML row
+                    _pills_html = '<div style="display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:4px;margin:8px 0 4px 0;overflow-x:auto;padding:6px 0;">'
+                    _n_transitions = 0
+                    for _i, (_d, _stage, _score) in enumerate(_traj):
+                        _colour = _stage_colour.get(_stage, "#64748b")
+                        _qlbl   = _q_label(_d)
+                        _score_str = f"{_score:.2f}" if _score is not None else "—"
+                        _pills_html += (
+                            f'<div title="Weighted score: {_score_str}" '
+                            f'style="background:{_colour};color:#0f172a;padding:8px 12px;'
+                            f'border-radius:10px;text-align:center;font-family:Georgia,serif;'
+                            f'min-width:88px;box-shadow:0 1px 4px rgba(0,0,0,0.3);'
+                            f'border:1.5px solid rgba(255,255,255,0.15);">'
+                            f'<div style="font-size:0.75em;opacity:0.85;font-weight:600;">{_qlbl}</div>'
+                            f'<div style="font-size:0.95em;font-weight:800;line-height:1.1;">Stage {_stage}</div>'
+                            f'<div style="font-size:0.65em;opacity:0.75;font-style:italic;">{_stage_label.get(_stage, "")}</div>'
+                            f'</div>'
+                        )
+                        # Arrow between pills (only between pills, not after the last one)
+                        if _i < len(_traj) - 1:
+                            _next_stage = _traj[_i + 1][1]
+                            _delta = (_next_stage - _stage) if (_next_stage is not None and _stage is not None) else 0
+                            if _delta != 0:
+                                _n_transitions += 1
+                                _delta_colour = "#22c55e" if _delta > 0 else "#ef4444"
+                                _delta_sign = "↑" if _delta > 0 else "↓"
+                                _pills_html += (
+                                    f'<div style="display:flex;flex-direction:column;align-items:center;'
+                                    f'margin:0 4px;color:#fbbf24;font-size:1.4em;font-weight:800;'
+                                    f'line-height:1;">'
+                                    f'<div>⇒</div>'
+                                    f'<div style="font-size:0.55em;color:{_delta_colour};margin-top:2px;'
+                                    f'font-weight:700;">{_delta_sign} {_delta:+d}</div>'
+                                    f'</div>'
+                                )
+                            else:
+                                _pills_html += (
+                                    '<div style="color:#64748b;font-size:1.2em;margin:0 2px;'
+                                    'opacity:0.6;">→</div>'
+                                )
+                    _pills_html += '</div>'
+
+                    st.markdown(_pills_html, unsafe_allow_html=True)
+                    _plural = "s" if _n_transitions != 1 else ""
+                    st.caption(
+                        f"{_n_transitions} stage transition{_plural} in the last {len(_traj)} quarters. "
+                        f"Hover any pill for its weighted score."
+                    )
+
+                st.markdown("---")
+
                 # ── Section 5: Business Model 5-tab explainer ─────────────────
                 _bm_display_now = CAT_DISPLAY.get(bm_category, bm_category.title())
                 st.subheader(f"🧬 Business Model: {_bm_display_now}")
