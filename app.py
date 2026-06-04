@@ -1082,6 +1082,12 @@ def main_dashboard():
             text-align: center !important;
         }
 
+        /* --- Stage-Based Analysis nav button: white outline when inactive --- */
+        button[data-sba="true"] {
+            border: 1.5px solid #ffffff !important;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.35) !important;
+        }
+
         /* --- BM-tab "assigned category" highlight (gold underline)  --- */
         .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] {
             border-bottom: 3px solid #fbbf24 !important;
@@ -1200,15 +1206,12 @@ def main_dashboard():
         unsafe_allow_html=True,
     )
 
-    # Nav buttons — Stage-Based Analysis highlighted with a distinct style
+    # Nav buttons — Stage-Based Analysis gets a white border outline when inactive
     _nav_cols = st.columns(len(PAGES))
     for _i, _p in enumerate(PAGES):
         with _nav_cols[_i]:
             _is_active = _p == st.session_state.active_page
-            _is_sba    = _p == "Stage-Based Analysis"
-            # Stage-Based Analysis uses primary type always (gold) so it stands out;
-            # other active pages use primary, inactive use secondary.
-            _btn_type = "primary" if (_is_active or _is_sba) else "secondary"
+            _btn_type  = "primary" if _is_active else "secondary"
             if st.button(
                 _p,
                 key=f"nav_btn_{_i}",
@@ -1217,6 +1220,26 @@ def main_dashboard():
             ):
                 st.session_state.active_page = _p
                 st.rerun()
+
+    # JS: tag the Stage-Based Analysis button so CSS can give it a white outline
+    st.markdown(
+        """
+        <script>
+        (function() {
+            setTimeout(function() {
+                document.querySelectorAll('button[data-testid="baseButton-secondary"]').forEach(function(btn) {
+                    if ((btn.textContent || '').trim() === 'Stage-Based Analysis') {
+                        btn.setAttribute('data-sba', 'true');
+                    } else {
+                        btn.removeAttribute('data-sba');
+                    }
+                });
+            }, 80);
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
     active = st.session_state.active_page
 
@@ -1316,19 +1339,27 @@ def main_dashboard():
             chart_hist = hist.tail(504)  # 2y for chart
             news = stock.news
 
-        # Header Metrics — 8 key stats
-        _m = st.columns(8)
-        _price  = info.get('currentPrice') or info.get('regularMarketPrice')
-        _prev   = info.get('previousClose') or info.get('regularMarketPreviousClose')
-        _chg    = round((_price - _prev) / _prev * 100, 2) if (_price and _prev) else None
-        _m[0].metric("Price", f"${_price:.2f}" if _price else "N/A", delta=f"{_chg:+.2f}%" if _chg is not None else None)
-        _m[1].metric("Market Cap", f"${info.get('marketCap', 0)/1e9:.1f}B" if info.get('marketCap') else "N/A")
-        _m[2].metric("Beta", f"{info.get('beta', 'N/A')}")
-        _m[3].metric("52W High", f"${info.get('fiftyTwoWeekHigh', 'N/A')}")
-        _m[4].metric("52W Low", f"${info.get('fiftyTwoWeekLow', 'N/A')}")
-        _m[5].metric("P/E (TTM)", f"{info.get('trailingPE', 'N/A'):.1f}x" if isinstance(info.get('trailingPE'), (int, float)) else "N/A")
-        _m[6].metric("EPS (TTM)", f"${info.get('trailingEps', 'N/A'):.2f}" if isinstance(info.get('trailingEps'), (int, float)) else "N/A")
-        _m[7].metric("Div Yield", f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else "None")
+        # Header Metrics — split across 3 rows so nothing clips on any screen
+        _price = info.get('currentPrice') or info.get('regularMarketPrice')
+        _prev  = info.get('previousClose') or info.get('regularMarketPreviousClose')
+        _chg   = round((_price - _prev) / _prev * 100, 2) if (_price and _prev) else None
+
+        # Row 1: core price stats
+        _r1a, _r1b, _r1c = st.columns(3)
+        _r1a.metric("Price", f"${_price:.2f}" if _price else "N/A", delta=f"{_chg:+.2f}%" if _chg is not None else None)
+        _r1b.metric("Market Cap", f"${info.get('marketCap', 0)/1e9:.1f}B" if info.get('marketCap') else "N/A")
+        _r1c.metric("Beta", f"{info.get('beta', 'N/A')}")
+
+        # Row 2: 52-week range (centered with blank outer columns)
+        _r2a, _r2b, _r2c, _r2d = st.columns(4)
+        _r2b.metric("52W High", f"${info.get('fiftyTwoWeekHigh', 'N/A')}")
+        _r2c.metric("52W Low",  f"${info.get('fiftyTwoWeekLow',  'N/A')}")
+
+        # Row 3: valuation + yield
+        _r3a, _r3b, _r3c = st.columns(3)
+        _r3a.metric("P/E (TTM)", f"{info.get('trailingPE', 'N/A'):.1f}x" if isinstance(info.get('trailingPE'), (int, float)) else "N/A")
+        _r3b.metric("EPS (TTM)", f"${info.get('trailingEps', 'N/A'):.2f}" if isinstance(info.get('trailingEps'), (int, float)) else "N/A")
+        _r3c.metric("Div Yield", f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else "None")
 
         st.markdown("---")
 
@@ -1407,91 +1438,86 @@ def main_dashboard():
         # TAB 2: Financials
         with tabs[1]:
             fin_tabs = st.tabs(["Detailed View", "Simplified View"])
-            
-            # Process Balance Sheet to add Debt/Equity
-            bs = stock.balance_sheet.copy()
-            
-            # Calculate Debt to Equity Ratio if possible
-            # Standard keys: 'Total Debt', 'Total Equity Gross Minority Interest' (or 'Stockholders Equity')
+
+            # Safely fetch balance sheet — _AVStockProxy (AV fallback) has no .balance_sheet
             try:
-                # Find Total Debt
-                t_debt = None
-                if 'Total Debt' in bs.index:
-                    t_debt = bs.loc['Total Debt']
-                elif 'Long Term Debt' in bs.index and 'Current Debt' in bs.index:
-                    t_debt = bs.loc['Long Term Debt'] + bs.loc['Current Debt']
-                
-                # Find Equity
-                t_equity = None
-                if 'Total Equity Gross Minority Interest' in bs.index:
-                    t_equity = bs.loc['Total Equity Gross Minority Interest']
-                elif 'Stockholders Equity' in bs.index:
-                    t_equity = bs.loc['Stockholders Equity']
-                
-                if t_debt is not None and t_equity is not None:
-                    # Avoid division by zero
-                    de_ratio = t_debt / t_equity.replace(0, np.nan)
-                    
-                    # Create a new DataFrame for the row to append
-                    # We need to ensure the new row aligns with columns (dates)
-                    de_row = pd.DataFrame(de_ratio).T
-                    de_row.index = ["Debt to Equity Ratio"]
-                    
-                    # Concatenate
-                    bs = pd.concat([de_row, bs])
-            except Exception as e:
-                # st.error(f"D/E Ratio Error: {e}") 
-                pass
+                _raw_bs = getattr(stock, 'balance_sheet', None)
+                if _raw_bs is None:
+                    raise AttributeError("no balance sheet")
+                bs = _raw_bs.copy()
+            except Exception:
+                bs = None
 
-            # Styler Function for highlighting
-            def highlight_de_row(s):
-                if s.name == "Debt to Equity Ratio":
-                    return ['background-color: #facc15; color: black; font-weight: bold' for _ in s]
-                return ['' for _ in s]
-
-            # 1. Detailed View
-            with fin_tabs[0]:
+            if bs is None or bs.empty:
+                with fin_tabs[0]:
+                    st.info("Balance sheet data not available for this ticker or data source. Try refreshing or switching to a direct market data source.")
+                with fin_tabs[1]:
+                    st.info("Balance sheet data not available.")
+            else:
+                # Add Debt/Equity row
                 try:
-                    # Robust styling: Check if row exists before applying specific formatting
-                    if "Debt to Equity Ratio" in bs.index:
-                        styler = bs.style.format("{:,.2f}", subset=pd.IndexSlice[["Debt to Equity Ratio"], :]) \
-                                         .format("{:,.0f}", subset=bs.index.difference(["Debt to Equity Ratio"])) \
-                                         .apply(highlight_de_row, axis=1)
-                    else:
-                        styler = bs.style.format("{:,.0f}")
-                    st.dataframe(styler)
-                except Exception as e:
-                    st.dataframe(bs) # Fallback to raw dataframe if styling fails
-            
-            # 2. Simplified View
-            with fin_tabs[1]:
-                try:
-                    def simplify_number(n):
-                        try:
-                            abs_n = abs(n)
-                            if abs_n < 1000: # Small ratios
-                                return f"{n:.2f}"
-                            if abs_n >= 1e9:
-                                return f"{n/1e9:.2f}B"
-                            elif abs_n >= 1e6:
-                                return f"{n/1e6:.2f}M"
-                            elif abs_n >= 1e3:
-                                return f"{n/1e3:.2f}K"
-                            else:
-                                return f"{n:.2f}"
-                        except:
-                            return n
+                    t_debt = None
+                    if 'Total Debt' in bs.index:
+                        t_debt = bs.loc['Total Debt']
+                    elif 'Long Term Debt' in bs.index and 'Current Debt' in bs.index:
+                        t_debt = bs.loc['Long Term Debt'] + bs.loc['Current Debt']
 
-                    # Apply simplification map to the dataframe
-                    simple_df = bs.applymap(simplify_number)
-                    
-                    # Re-apply styling only if row exists
-                    if "Debt to Equity Ratio" in simple_df.index:
-                        st.dataframe(simple_df.style.apply(highlight_de_row, axis=1))
-                    else:
-                        st.dataframe(simple_df)
-                except Exception as e:
-                    st.dataframe(bs) # Fallback
+                    t_equity = None
+                    if 'Total Equity Gross Minority Interest' in bs.index:
+                        t_equity = bs.loc['Total Equity Gross Minority Interest']
+                    elif 'Stockholders Equity' in bs.index:
+                        t_equity = bs.loc['Stockholders Equity']
+
+                    if t_debt is not None and t_equity is not None:
+                        de_ratio = t_debt / t_equity.replace(0, np.nan)
+                        de_row = pd.DataFrame(de_ratio).T
+                        de_row.index = ["Debt to Equity Ratio"]
+                        bs = pd.concat([de_row, bs])
+                except Exception:
+                    pass
+
+                def highlight_de_row(s):
+                    if s.name == "Debt to Equity Ratio":
+                        return ['background-color: #facc15; color: black; font-weight: bold' for _ in s]
+                    return ['' for _ in s]
+
+                with fin_tabs[0]:
+                    try:
+                        if "Debt to Equity Ratio" in bs.index:
+                            styler = bs.style.format("{:,.2f}", subset=pd.IndexSlice[["Debt to Equity Ratio"], :]) \
+                                             .format("{:,.0f}", subset=bs.index.difference(["Debt to Equity Ratio"])) \
+                                             .apply(highlight_de_row, axis=1)
+                        else:
+                            styler = bs.style.format("{:,.0f}")
+                        st.dataframe(styler)
+                    except Exception:
+                        st.dataframe(bs)
+
+                with fin_tabs[1]:
+                    try:
+                        def simplify_number(n):
+                            try:
+                                abs_n = abs(n)
+                                if abs_n < 1000:
+                                    return f"{n:.2f}"
+                                if abs_n >= 1e9:
+                                    return f"{n/1e9:.2f}B"
+                                elif abs_n >= 1e6:
+                                    return f"{n/1e6:.2f}M"
+                                elif abs_n >= 1e3:
+                                    return f"{n/1e3:.2f}K"
+                                else:
+                                    return f"{n:.2f}"
+                            except Exception:
+                                return n
+
+                        simple_df = bs.applymap(simplify_number)
+                        if "Debt to Equity Ratio" in simple_df.index:
+                            st.dataframe(simple_df.style.apply(highlight_de_row, axis=1))
+                        else:
+                            st.dataframe(simple_df)
+                    except Exception:
+                        st.dataframe(bs)
 
     # --- PAGE 2: DCF Model ---
     elif page == "DCF Model":
@@ -1527,19 +1553,19 @@ def main_dashboard():
         
         if st.session_state.dcf_debt == 0.0:
             try:
-                bs = stock.balance_sheet
-                if not bs.empty:
+                bs = getattr(stock, 'balance_sheet', None)
+                if bs is not None and not bs.empty:
                     if 'Total Debt' in bs.index:
                         total_debt = float(bs.loc['Total Debt'].iloc[0])
                     elif 'Long Term Debt' in bs.index:
                         total_debt = float(bs.loc['Long Term Debt'].iloc[0])
                     st.session_state.dcf_debt = total_debt
             except: pass
-            
+
         if st.session_state.dcf_cash == 0.0:
             try:
-                bs = stock.balance_sheet
-                if not bs.empty:
+                bs = getattr(stock, 'balance_sheet', None)
+                if bs is not None and not bs.empty:
                     if 'Cash And Cash Equivalents' in bs.index:
                         total_cash = float(bs.loc['Cash And Cash Equivalents'].iloc[0])
                     st.session_state.dcf_cash = total_cash
@@ -2602,7 +2628,7 @@ def main_dashboard():
                             f"{spread_str}" + (f" — {rpo_note}" if rpo_note else "")
                         )
 
-                    # Addition 3: Full fair-range reference — visible bordered box, larger text
+                    # Addition 3: Full fair-range reference — 3 columns only (no Verdict)
                     fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
                     if fair_rows:
                         th_s = ("padding:14px 18px;text-align:left;color:#fde68a;"
@@ -2614,52 +2640,16 @@ def main_dashboard():
                         rows_html = []
                         for (disp_name, val_key, fr_low, fr_high, fr_unit, kind) in fair_rows:
                             cur_raw = val_data.get(val_key)
-                            if cur_raw is None:
-                                cur_str      = "—"
-                                verdict_html = f'<span style="color:#64748b;font-weight:600;">N/A</span>'
-                            else:
-                                try:
-                                    cur_f   = float(cur_raw)
-                                    cur_str = f"{cur_f:.1f}{fr_unit}"
-                                    # Standardised 3-tier verdict: Good / Fair / Poor
-                                    # (higher direction depends on the metric kind, but the
-                                    # quality label is consistent across all three kinds)
-                                    _GOOD = '<span style="color:#22c55e;font-weight:700;">✅ Good</span>'
-                                    _FAIR = '<span style="color:#fbbf24;font-weight:700;">⚖️ Fair</span>'
-                                    _POOR = '<span style="color:#ef4444;font-weight:700;">🔴 Poor</span>'
-                                    if kind == "yield":
-                                        # Higher yield = better → above range is GOOD, below is POOR
-                                        if fr_low <= cur_f <= fr_high:
-                                            verdict_html = _FAIR
-                                        elif cur_f > fr_high:
-                                            verdict_html = _GOOD
-                                        else:
-                                            verdict_html = _POOR
-                                    elif kind == "score":
-                                        # Higher score = better → above range is GOOD, below is POOR
-                                        if fr_low <= cur_f <= fr_high:
-                                            verdict_html = _FAIR
-                                        elif cur_f > fr_high:
-                                            verdict_html = _GOOD
-                                        else:
-                                            verdict_html = _POOR
-                                    else:  # multiple
-                                        # Higher multiple = more expensive → above range is POOR, below is GOOD
-                                        if fr_low <= cur_f <= fr_high:
-                                            verdict_html = _FAIR
-                                        elif cur_f < fr_low:
-                                            verdict_html = _GOOD
-                                        else:
-                                            verdict_html = _POOR
-                                except (TypeError, ValueError):
-                                    cur_str      = str(cur_raw)
-                                    verdict_html = '<span style="color:#64748b;">—</span>'
+                            cur_str = "—" if cur_raw is None else (
+                                f"{float(cur_raw):.1f}{fr_unit}"
+                                if isinstance(cur_raw, (int, float))
+                                else str(cur_raw)
+                            )
                             rows_html.append(
                                 f'<tr>'
                                 f'<td style="{td_s}font-weight:600;">{disp_name}</td>'
                                 f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}{fr_unit}</td>'
                                 f'<td style="{td_s}text-align:center;font-weight:700;color:#fbbf24;">{cur_str}</td>'
-                                f'<td style="{td_s}text-align:center;">{verdict_html}</td>'
                                 f'</tr>'
                             )
                         st.markdown(
@@ -2676,7 +2666,6 @@ def main_dashboard():
                             f'<th style="{th_s}">Metric</th>'
                             f'<th style="{th_s}text-align:center;">Fair Range</th>'
                             f'<th style="{th_s}text-align:center;">Current</th>'
-                            f'<th style="{th_s}text-align:center;">Verdict</th>'
                             '</tr></thead><tbody>'
                             + "".join(rows_html)
                             + '</tbody></table></div>',
@@ -2790,23 +2779,6 @@ def main_dashboard():
                         (matrix_cell,),
                     ).fetchall()
 
-                    def _verdict_html(cv, lo, hi, kind):
-                        if cv is None or pd.isna(cv) or lo is None or hi is None:
-                            return ""
-                        try:
-                            cvf = float(cv)
-                        except (TypeError, ValueError):
-                            return ""
-                        if kind == "yield":
-                            if lo <= cvf <= hi: return "⚖️ Fair"
-                            return "✅ Good" if cvf > hi else "🔴 Poor"
-                        if kind == "score":
-                            if lo <= cvf <= hi: return "⚖️ Fair"
-                            return "✅ Good" if cvf > hi else "🔴 Poor"
-                        # multiple
-                        if lo <= cvf <= hi: return "⚖️ Fair"
-                        return "✅ Good" if cvf < lo else "🔴 Poor"
-
                     _peer_records = []
                     for r in _peer_rows_raw:
                         _peer_records.append({
@@ -2817,7 +2789,6 @@ def main_dashboard():
                             "Rev Growth YoY":   _fmt_pct(r[4]),
                             "Op Leverage":      _fmt_pp(r[5]),
                             _disp_name:         _fmt_unit(r[6], _u),
-                            "Verdict":          _verdict_html(r[6], _lo, _hi, _kind),
                         })
                     _peer_df = pd.DataFrame(_peer_records)
 
@@ -2831,8 +2802,8 @@ def main_dashboard():
                     )
                     st.dataframe(_styled, use_container_width=True, hide_index=True)
                     st.caption(
-                        f"Fair range for **{_disp_name}** in {matrix_cell}: {_lo}–{_hi}{_u}. "
-                        f"Verdict = Good / Fair / Poor based on each peer's position vs that range."
+                        f"Peers in matrix cell **{matrix_cell}** — valued on the cell's primary method ({_primary_method}). "
+                        f"Fair range for {_disp_name}: {_lo}–{_hi}{_u}."
                     )
 
                 elif _cell_count < _MODE_A_THRESHOLD:
