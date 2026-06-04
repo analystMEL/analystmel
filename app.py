@@ -11,9 +11,9 @@ from yahooquery import Ticker as YQTicker
 import json
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Valuora", page_icon="🌊", layout="wide")
+st.set_page_config(page_title="Contextual Valuation Engine", page_icon=None, layout="wide")
 
-# --- Valoura DB Connection ---
+# --- CVE DB Connection ---
 @st.cache_resource
 def get_db_connection():
     import sqlite3, os
@@ -186,12 +186,12 @@ def fetch_google_news_rss(ticker):
 def get_competitors(ticker, info):
     """
     Returns the industry and a list of 5 competitor tickers.
-    Priority: (1) Valoura DB — same matrix_cell peers; (2) hardcoded sector map; (3) generic ETFs.
+    Priority: (1) CVE DB — same matrix_cell peers; (2) hardcoded sector map; (3) generic ETFs.
     """
     industry = info.get('industry', 'Unknown Industry')
     sector = info.get('sector', 'Unknown Sector')
 
-    # --- Addition 3: Valoura matrix_cell peer lookup ---
+    # --- CVE matrix_cell peer lookup ---
     try:
         conn_vb = get_db_connection()
         if conn_vb is not None:
@@ -206,7 +206,7 @@ def get_competitors(ticker, info):
                 ).fetchall()
                 peers = [r[0] for r in peer_rows]
                 if peers:
-                    return f"{industry} (Valoura: {matrix_cell})", peers[:5]
+                    return f"{industry} (CVE: {matrix_cell})", peers[:5]
     except Exception:
         pass  # Fall through to hardcoded map on any DB error
 
@@ -502,7 +502,7 @@ def get_av_key():
 
 def get_secret(key, default=None):
     """Read a secret from Streamlit secrets (cloud) or env var (local).
-    Used by Valoura Interpretation engine to fetch GEMINI_API_KEY."""
+    Used by CVE Interpretation engine to fetch GEMINI_API_KEY."""
     import os
     try:
         if key in st.secrets:
@@ -674,7 +674,7 @@ def get_ai_geopol_summary(location, news_items):
     headlines = [n['title'] for n in news_items[:3]]
     summary = f"**Intelligence Report:** {location} is currently seeing high volatility. "
     summary += f"Key developments include: '{headlines[0]}'. "
-    summary += "Valoura AI predicts continued pressure on global shipping rates if this trend persists."
+    summary += "CVE predicts continued pressure on global shipping rates if this trend persists."
     return summary
 
 # --- ALPHA VANTAGE FALLBACK (for cloud deployments where Yahoo IP-blocks) ---
@@ -937,34 +937,31 @@ def main_dashboard():
         }
         section[data-testid="stSidebar"] + section > div.block-container,
         .main .block-container {
-            padding-top: 1rem !important;
+            padding-top: 0.25rem !important;
             max-width: 100% !important;
         }
 
         /* --- Horizontal navigation bar --- */
         .valoura-topbar {
             background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0a1128 100%);
-            border-radius: 14px;
-            padding: 22px 20px 18px 20px;
-            margin: 0 0 22px 0;
+            border-radius: 10px;
+            padding: 12px 20px 10px 20px;
+            margin: 0 0 12px 0;
             text-align: center;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.35);
-            border: 1px solid rgba(251,191,36,0.15);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            border: 1px solid rgba(251,191,36,0.12);
         }
         .valoura-brand {
             font-family: 'Times New Roman', Times, serif;
-            font-size: 2.3em;
-            font-weight: 800;
+            font-size: 1.4em;
+            font-weight: 700;
             color: #ffffff;
-            letter-spacing: 1.5px;
-            text-shadow: 2px 2px 6px rgba(0,0,0,0.5);
-            margin-bottom: 4px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 0;
         }
         .valoura-tagline {
-            color: #cbd5e1;
-            font-size: 0.85em;
-            font-style: italic;
-            margin-bottom: 14px;
+            display: none;
         }
         /* --- Help tooltip icon (next to st.metric label) — make it visible --- */
         [data-testid="stTooltipIcon"],
@@ -1180,43 +1177,62 @@ def main_dashboard():
     if 'dcf_debt' not in st.session_state: st.session_state.dcf_debt = 0.0
     if 'dcf_cash' not in st.session_state: st.session_state.dcf_cash = 0.0
 
-    # --- Horizontal Navigation (replaces sidebar) ---
+    # --- Horizontal Navigation ---
     PAGES = [
         "Financial Analysis",
-        "DCF Model",
-        "Macro Stress Test",
-        "Company Profile & Roadmap",
-        "Valoura Analysis",
+        "Stage-Based Analysis",
+        "Company Profile",
+        "Other",
     ]
+    # Subpages rendered inside "Other"
+    OTHER_SUBPAGES = ["DCF Model", "Macro Stress Test"]
 
     if 'active_page' not in st.session_state:
         st.session_state.active_page = "Financial Analysis"
+    if 'other_subpage' not in st.session_state:
+        st.session_state.other_subpage = "DCF Model"
 
-    # Header banner (visual only — no nav links inside)
+    # Header banner — compact, no tagline
     st.markdown(
         '<div class="valoura-topbar">'
-        '<div class="valoura-brand">🌊 Valuora</div>'
-        '<div class="valoura-tagline">Context-aware valuation engine</div>'
+        '<div class="valoura-brand">Contextual Valuation Engine</div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # Nav pills as real st.buttons (AJAX rerun, no full-page reload).
-    # CSS in the main style block turns primary buttons into gold pills
-    # and secondary buttons into translucent pills.
+    # Nav buttons — Stage-Based Analysis highlighted with a distinct style
     _nav_cols = st.columns(len(PAGES))
     for _i, _p in enumerate(PAGES):
         with _nav_cols[_i]:
+            _is_active = _p == st.session_state.active_page
+            _is_sba    = _p == "Stage-Based Analysis"
+            # Stage-Based Analysis uses primary type always (gold) so it stands out;
+            # other active pages use primary, inactive use secondary.
+            _btn_type = "primary" if (_is_active or _is_sba) else "secondary"
             if st.button(
                 _p,
                 key=f"nav_btn_{_i}",
                 use_container_width=True,
-                type=("primary" if _p == st.session_state.active_page else "secondary"),
+                type=_btn_type,
             ):
                 st.session_state.active_page = _p
                 st.rerun()
 
     active = st.session_state.active_page
+
+    # Subpage selector inside "Other"
+    if active == "Other":
+        _sub_cols = st.columns([1, 1, 4])
+        for _j, _sp in enumerate(OTHER_SUBPAGES):
+            with _sub_cols[_j]:
+                if st.button(
+                    _sp,
+                    key=f"other_sub_{_j}",
+                    use_container_width=True,
+                    type=("primary" if _sp == st.session_state.other_subpage else "secondary"),
+                ):
+                    st.session_state.other_subpage = _sp
+                    st.rerun()
 
     # --- Control Row: Ticker input + Run Analysis button ---
     ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 4])
@@ -1272,7 +1288,7 @@ def main_dashboard():
 
             if stock is None or info is None:
                 st.error(
-                    f"⚠️ Valoura cannot reach any data source for **{clean_ticker}**.\n\n"
+                    f"⚠️ CVE cannot reach any data source for **{clean_ticker}**.\n\n"
                     f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
                     f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
                     f"Go to App Settings → Secrets and add:\n\n"
@@ -1284,61 +1300,43 @@ def main_dashboard():
         else:
             stock, info = st.session_state.stock_data
     else:
-        st.info("👋 Enter a ticker and click 'Run Analysis' to begin.")
+        st.info("Enter a ticker and click 'Run Analysis' to begin.")
         st.stop()
+
+    # Dispatch "Other" to its selected subpage before routing
+    if page == "Other":
+        page = st.session_state.get("other_subpage", "DCF Model")
 
     # --- PAGE 1: Financial Analysis ---
     if page == "Financial Analysis":
-        # Formal Header
-        st.markdown(f'<div class="fun-header">Valuora: {ticker_symbol}</div>', unsafe_allow_html=True)
-        st.markdown(f"**{info.get('longName', ticker_symbol)}** | Made by Om")
-        
-        with st.spinner("🤖 AI is reading the charts..."):
-            hist = stock.history(period="max") # Fetch max for "All Time" calc
-            chart_hist = hist.tail(504) # 2y for chart
+        st.markdown(f'<div class="fun-header">{info.get("longName", ticker_symbol)} ({ticker_symbol})</div>', unsafe_allow_html=True)
+
+        with st.spinner("Loading market data..."):
+            hist = stock.history(period="max")
+            chart_hist = hist.tail(504)  # 2y for chart
             news = stock.news
-        
-        # Header Metrics (Glassmorphism)
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Current Price", f"${info.get('currentPrice', 'N/A')}")
-        m2.metric("Market Cap", f"${info.get('marketCap', 0)/1e9:.2f}B" if info.get('marketCap') else "N/A")
-        m3.metric("Beta (Vol)", f"{info.get('beta', 'N/A')}")
-        m4.metric("52W High", f"${info.get('fiftyTwoWeekHigh', 'N/A')}")
+
+        # Header Metrics — 8 key stats
+        _m = st.columns(8)
+        _price  = info.get('currentPrice') or info.get('regularMarketPrice')
+        _prev   = info.get('previousClose') or info.get('regularMarketPreviousClose')
+        _chg    = round((_price - _prev) / _prev * 100, 2) if (_price and _prev) else None
+        _m[0].metric("Price", f"${_price:.2f}" if _price else "N/A", delta=f"{_chg:+.2f}%" if _chg is not None else None)
+        _m[1].metric("Market Cap", f"${info.get('marketCap', 0)/1e9:.1f}B" if info.get('marketCap') else "N/A")
+        _m[2].metric("Beta", f"{info.get('beta', 'N/A')}")
+        _m[3].metric("52W High", f"${info.get('fiftyTwoWeekHigh', 'N/A')}")
+        _m[4].metric("52W Low", f"${info.get('fiftyTwoWeekLow', 'N/A')}")
+        _m[5].metric("P/E (TTM)", f"{info.get('trailingPE', 'N/A'):.1f}x" if isinstance(info.get('trailingPE'), (int, float)) else "N/A")
+        _m[6].metric("EPS (TTM)", f"${info.get('trailingEps', 'N/A'):.2f}" if isinstance(info.get('trailingEps'), (int, float)) else "N/A")
+        _m[7].metric("Div Yield", f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else "None")
 
         st.markdown("---")
 
-        tabs = st.tabs(["🧠 AI Verdict", "📊 Live Charts", "📑 The Books"])
+        tabs = st.tabs(["Live Chart", "Financials"])
 
-        # TAB 1: AI Judgment
+        # TAB 1: Chart
         with tabs[0]:
-            st.subheader("🤖 Valuora Verdict")
-            verdict_points, score = generate_ai_verdict(info, news, hist, ticker=ticker_symbol)
-            
-            # Visual Sentiment Meter
-            st.write(" **Market Sentiment Score:**")
-            
-            # Create a visual progress bar based on score
-            # Score roughly -3 to +3. Normalize to 0-100 for progress bar.
-            # 0 = -3 (Bearish), 50 = 0 (Neutral), 100 = +3 (Bullish)
-            normalized_score = min(max((score + 3) / 6, 0.0), 1.0)
-            
-            if score >= 1:
-                st.progress(normalized_score, text="Sentiment: BULLISH 🐂")
-                st.success("The AI detects strong positive signals!")
-            elif score <= -1:
-                st.progress(normalized_score, text="Sentiment: BEARISH 🐻")
-                st.error("The AI detects risks and negative trends.")
-            else:
-                st.progress(normalized_score, text="Sentiment: NEUTRAL 🦆")
-                st.warning("The AI sees a mixed bag. Proceed with caution.")
-            
-            with st.expander("See Analysis Details", expanded=True):
-                for point in verdict_points:
-                    st.markdown(point)
-
-        # TAB 2: Chart
-        with tabs[1]:
-            st.subheader("📊 Price Action")
+            st.subheader("Price Action")
             if not chart_hist.empty:
                 fig = go.Figure()
                 fig.add_trace(go.Candlestick(x=chart_hist.index,
@@ -1352,7 +1350,7 @@ def main_dashboard():
             
             # --- Returns Display ---
             if not hist.empty:
-                st.markdown("##### 📈 Historical Returns")
+                st.markdown("##### Historical Returns")
                 # Calculate Returns
                 current_price = hist['Close'].iloc[-1]
                 
@@ -1406,8 +1404,8 @@ def main_dashboard():
                             </div>
                             """, unsafe_allow_html=True)
 
-        # TAB 3: Financials
-        with tabs[2]:
+        # TAB 2: Financials
+        with tabs[1]:
             fin_tabs = st.tabs(["Detailed View", "Simplified View"])
             
             # Process Balance Sheet to add Debt/Equity
@@ -1497,7 +1495,7 @@ def main_dashboard():
 
     # --- PAGE 2: DCF Model ---
     elif page == "DCF Model":
-        st.markdown(f'<div class="fun-header">🔮 DCF Model: {ticker_symbol}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="fun-header">DCF Model: {ticker_symbol}</div>', unsafe_allow_html=True)
         st.subheader("Discounted Cash Flow Calculator")
         st.markdown("Determine the fair value of the stock based on its future cash flow projections.")
 
@@ -1666,7 +1664,7 @@ def main_dashboard():
         """)
     # --- PAGE 4: Macro Stress Test ---
     elif page == "Macro Stress Test":
-        st.markdown('<div class="fun-header">🌍 Geopolitical Command Center</div>', unsafe_allow_html=True)
+        st.markdown('<div class="fun-header">Macro Stress Test</div>', unsafe_allow_html=True)
 
         current_prices, hist_macro = fetch_macro_command_center()
         oil_price = current_prices.get("Crude Oil (WTI)", 0)
@@ -1696,7 +1694,7 @@ def main_dashboard():
 
         if not hist_macro.empty:
             # --- 60-DAY LINE CHART FIX ---
-            st.subheader("📈 60-Day Macro Trajectory")
+            st.subheader("60-Day Macro Trajectory")
 
             # Clean the data: drop NaNs so the lines are continuous
             chart_data = (hist_macro / hist_macro.iloc[0]) * 100
@@ -1718,7 +1716,7 @@ def main_dashboard():
                 st.dataframe(corr_matrix.style.background_gradient(cmap='RdYlGn', axis=None))
 
             with col_insight:
-                st.write("**Valoura Strategic Insight**")
+                st.write("**Strategic Insight**")
                 if "Crude Oil (WTI)" in corr_matrix.index and "S&P 500" in corr_matrix.columns:
                     oil_spx_corr = corr_matrix.loc["Crude Oil (WTI)", "S&P 500"]
                     if not pd.isna(oil_spx_corr) and oil_spx_corr < -0.3:
@@ -1770,8 +1768,8 @@ def main_dashboard():
             """, unsafe_allow_html=True)
 
     # --- PAGE 5: Company Profile ---
-    elif page == "Company Profile & Roadmap":
-        st.markdown(f"<div class='fun-header'>🏢 Profile: {info.get('longName', ticker_symbol)}</div>", unsafe_allow_html=True)
+    elif page == "Company Profile":
+        st.markdown(f"<div class='fun-header'>Company Profile: {info.get('longName', ticker_symbol)}</div>", unsafe_allow_html=True)
         
         col_prof1, col_prof2 = st.columns([2, 1])
         with col_prof1:
@@ -1792,7 +1790,7 @@ def main_dashboard():
             st.metric("Industry", info.get('industry', 'N/A'))
 
         st.markdown("---")
-        st.subheader("🚀 Strategic Roadmap & News")
+        st.subheader("News & Strategic Updates")
         st.markdown("Recent events shaping the company's future:")
         
         with st.spinner("Fetching latest news..."):
@@ -1876,8 +1874,8 @@ def main_dashboard():
             else:
                 st.info("No recent news found from major sources.")
 
-    # --- PAGE 6: Valoura Analysis ---
-    elif page == "Valoura Analysis":
+    # --- PAGE 6: Stage-Based Analysis ---
+    elif page == "Stage-Based Analysis":
         # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
         # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
         # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
@@ -1917,7 +1915,7 @@ def main_dashboard():
 
         if not _ticker_in_db:
             st.info(
-                f"ℹ️ **{ticker_symbol}** is not in the Valoura database yet. "
+                f"ℹ️ **{ticker_symbol}** is not yet in the CVE database. "
                 "Run the data pipeline to ingest fundamentals + classify this ticker."
             )
         else:
@@ -1960,7 +1958,7 @@ def main_dashboard():
 
             st.markdown("---")
 
-        st.markdown(f"<div class='fun-header'>🎯 Valoura Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='fun-header'>Stage-Based Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
 
         # ── Constants ────────────────────────────────────────────────────────
         BM_CATEGORIES = ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]
@@ -2191,7 +2189,7 @@ def main_dashboard():
             ).fetchone()
 
             if cls_row is None:
-                st.info(f"ℹ️ **{ticker_symbol}** has not been classified by the Valoura engine yet. "
+                st.info(f"ℹ️ **{ticker_symbol}** has not been classified by the CVE engine yet. "
                         "Run the data pipeline to classify this ticker.")
             else:
                 (bm_category, fh_stage, matrix_cell, bm_confidence, bm_method, bm_llm_rationale,
@@ -2279,7 +2277,7 @@ def main_dashboard():
                 st.markdown("---")
 
                 # ── Section 4: Financial Health diagnosis (MAIN visible section) ─
-                st.subheader(f"🩺 Financial Health: Stage {fh_stage} — {stage_label.split('— ', 1)[-1]}")
+                st.subheader(f"Financial Health: Stage {fh_stage} — {stage_label.split('— ', 1)[-1]}")
                 st.caption(
                     f"Weighted score **{fh_weighted_score:.2f}** · "
                     f"Classification confidence **{bm_confidence or '—'}**"
@@ -2431,7 +2429,7 @@ def main_dashboard():
 
                 # ── Section 5: Business Model 5-tab explainer ─────────────────
                 _bm_display_now = CAT_DISPLAY.get(bm_category, bm_category.title())
-                st.subheader(f"🧬 Business Model: {_bm_display_now}")
+                st.subheader(f"Business Model: {_bm_display_now}")
                 st.caption(
                     f"Your ticker is classified as **{_bm_display_now}** — Stage {fh_stage}. "
                     "The assigned category's tab is highlighted; click other tabs to see what "
@@ -2554,7 +2552,7 @@ def main_dashboard():
                     primary_method, val_json_str = val_row
                     val_data = json.loads(val_json_str) if val_json_str else {}
 
-                    st.subheader(f"📊 Valuation — {primary_method or 'Context-specific'}")
+                    st.subheader(f"Valuation — {primary_method or 'Context-specific'}")
 
                     # Only show non-None, non-RPO entries (layout unchanged)
                     display_items = [
@@ -2671,7 +2669,7 @@ def main_dashboard():
                             'box-shadow:0 4px 14px rgba(0,0,0,0.3);">'
                             '<div style="font-size:1.3em;font-weight:800;color:#fbbf24;'
                             f'padding:14px 18px 8px 18px;font-family:Times New Roman,Times,serif;">'
-                            f'📐 Fair-Range Reference — {matrix_cell}'
+                            f'Fair-Range Reference — {matrix_cell}'
                             '</div>'
                             '<table style="border-collapse:collapse;width:100%;">'
                             '<thead><tr>'
@@ -2750,7 +2748,7 @@ def main_dashboard():
 
                 _MODE_A_THRESHOLD = 3
 
-                st.subheader(f"🏢 Compare to Industry — {_bm_label}")
+                st.subheader(f"Compare to Industry — {_bm_label}")
 
                 if _cell_count >= _MODE_A_THRESHOLD:
                     # ── MODE A: same matrix cell, value on cell's primary metric ──
@@ -2908,7 +2906,7 @@ def main_dashboard():
                 # ── Row 5: VALOURA INTERPRETATION (Gemini-powered) ────────────
                 _interp_hdr_l, _interp_hdr_r = st.columns([5, 1])
                 with _interp_hdr_l:
-                    st.subheader("🔮 Valoura Interpretation")
+                    st.subheader("CVE Interpretation")
                 with _interp_hdr_r:
                     _regen_clicked = st.button(
                         "🔄 Regenerate",
@@ -3039,7 +3037,7 @@ def main_dashboard():
                         "active_flags":         _flags,
                     }
 
-                    with st.spinner("Generating Valoura interpretation..."):
+                    with st.spinner("Generating CVE interpretation..."):
                         _result, _err = _generate_valoura_interpretation(_context)
                     if _result:
                         st.session_state[_interp_cache_key] = _result
@@ -3086,7 +3084,7 @@ def generate_ai_verdict(info, news, history, ticker=None):
     verdict = []
     sentiment_score = 0 # Range roughly -3 to +3
 
-    # --- Addition 2: Prepend Valoura classification context ---
+    # --- Addition 2: Prepend CVE classification context ---
     if ticker:
         try:
             conn_vb = get_db_connection()
@@ -3155,20 +3153,20 @@ def generate_ai_verdict(info, news, history, ticker=None):
                             if fr_unit == "%":
                                 verdict_label = "✅ in range" if fr_low <= metric_value <= fr_high else ("🔥 rich" if metric_value < fr_low else "💰 cheap")
                                 valoura_line2 = (
-                                    f"📊 **Valoura Valuation:** {primary_method} — "
+                                    f"📊 **CVE Valuation:** {primary_method} — "
                                     f"{fr_metric} = {metric_value:.1f}% ({verdict_label}) | Fair range: {fr_low}–{fr_high}%"
                                 )
                             else:
                                 verdict_label = "✅ in range" if fr_low <= metric_value <= fr_high else ("🔥 rich" if metric_value > fr_high else "💰 cheap")
                                 valoura_line2 = (
-                                    f"📊 **Valoura Valuation:** {primary_method} — "
+                                    f"📊 **CVE Valuation:** {primary_method} — "
                                     f"{fr_metric} = {metric_value:.2f}x ({verdict_label}) | Fair range: {fr_low}–{fr_high}x"
                                 )
                         elif primary_method:
-                            valoura_line2 = f"📊 **Valoura Valuation method:** {primary_method}"
+                            valoura_line2 = f"📊 **CVE Valuation method:** {primary_method}"
 
                     bm_display = bm_category.replace("_", " ").title()
-                    verdict.insert(0, f"🎯 **Valoura Classification:** {bm_display} — {stage_label} | Matrix cell: **{matrix_cell}**")
+                    verdict.insert(0, f"🎯 **CVE Classification:** {bm_display} — {stage_label} | Matrix cell: **{matrix_cell}**")
                     if valoura_line2:
                         verdict.insert(1, valoura_line2)
         except Exception:
@@ -3218,10 +3216,4 @@ def generate_ai_verdict(info, news, history, ticker=None):
 
 # --- CONTROLLER ---
 if __name__ == "__main__":
-    if 'splash_complete' not in st.session_state:
-        st.session_state.splash_complete = False
-
-    if not st.session_state.splash_complete:
-        splash_screen()
-    else:
-        main_dashboard()
+    main_dashboard()
