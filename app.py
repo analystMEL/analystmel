@@ -982,27 +982,7 @@ def main_dashboard():
             opacity: 1 !important;
             stroke: #ffffff !important;
         }
-        /* Tooltip popup — expand to show all text, wrap properly */
-        [data-baseweb="tooltip"],
-        [role="tooltip"],
-        div[data-baseweb="tooltip"],
-        div[role="tooltip"] {
-            max-width: 420px !important;
-            width: max-content !important;
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
-            overflow: visible !important;
-        }
-        [data-baseweb="tooltip"] div,
-        [role="tooltip"] div {
-            max-width: 420px !important;
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow: visible !important;
-            line-height: 1.5 !important;
-            font-size: 0.82em !important;
-        }
+        /* Tooltip popup itself — make sure markdown lists render with visible bullets */
         [data-baseweb="tooltip"] ul,
         [role="tooltip"] ul {
             padding-left: 18px !important;
@@ -1011,8 +991,7 @@ def main_dashboard():
         [data-baseweb="tooltip"] li,
         [role="tooltip"] li {
             margin: 4px 0 !important;
-            line-height: 1.5 !important;
-            white-space: normal !important;
+            line-height: 1.45 !important;
         }
 
         /* --- Nav pills rendered as st.buttons (AJAX rerun, no full reload) --- */
