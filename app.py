@@ -844,9 +844,9 @@ def main_dashboard():
             font-family: 'Times New Roman', Times, serif;
         }
         
-        /* --- Main App Background (Dark Navy) --- */
+        /* --- Main App Background — deep black with cold-blue gradient --- */
         .stApp {
-            background: linear-gradient(135deg, #0a1128 0%, #1c2541 50%, #3a506b 100%);
+            background: linear-gradient(160deg, #000000 0%, #050d1a 40%, #0a1628 75%, #0f2040 100%);
             color: #ffffff;
         }
         
@@ -912,17 +912,18 @@ def main_dashboard():
         }
         div[data-testid="stMetric"]:hover {
             transform: translateY(-2px);
-            border-color: #6fffe9;
+            border-color: rgba(56,189,248,0.45);
+            box-shadow: 0 0 12px rgba(14,165,233,0.2);
         }
 
-        /* --- Formal Header (No gradient text) --- */
+        /* --- Formal Header --- */
         .fun-header {
             font-size: 3em;
             font-weight: 800;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
             font-family: 'Times New Roman', Times, serif;
             margin-bottom: 20px;
-            border-bottom: 2px solid #3a506b;
+            border-bottom: 1px solid rgba(56,189,248,0.25);
             padding-bottom: 10px;
         }
 
@@ -941,15 +942,15 @@ def main_dashboard():
             max-width: 100% !important;
         }
 
-        /* --- Horizontal navigation bar --- */
+        /* --- Horizontal navigation bar — black-to-cold-navy gradient --- */
         .valoura-topbar {
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0a1128 100%);
+            background: linear-gradient(135deg, #000000 0%, #050d1a 35%, #0a1a35 70%, #0f2855 100%);
             border-radius: 10px;
             padding: 12px 20px 10px 20px;
             margin: 0 0 12px 0;
             text-align: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            border: 1px solid rgba(251,191,36,0.12);
+            box-shadow: 0 2px 20px rgba(0,180,219,0.12), 0 0 0 1px rgba(56,189,248,0.1);
+            border: 1px solid rgba(56,189,248,0.15);
         }
         .valoura-brand {
             font-family: 'Times New Roman', Times, serif;
@@ -1009,27 +1010,28 @@ def main_dashboard():
         }
         div[data-testid="stButton"] > button[kind="secondary"]:hover,
         button[data-testid="stBaseButton-secondary"]:hover {
-            background: rgba(251,191,36,0.18) !important;
-            color: #fde68a !important;
-            border-color: rgba(251,191,36,0.45) !important;
+            background: rgba(56,189,248,0.14) !important;
+            color: #bae6fd !important;
+            border-color: rgba(56,189,248,0.4) !important;
         }
-        /* Active (primary) — gold gradient pill */
+        /* Active (primary) — ice-blue gradient pill */
         div[data-testid="stButton"] > button[kind="primary"],
         button[data-testid="stBaseButton-primary"] {
-            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%) !important;
-            color: #0f172a !important;
-            border: 1px solid #fde68a !important;
+            background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 50%, #0369a1 100%) !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(125,211,252,0.6) !important;
             border-radius: 999px !important;
             font-family: 'Times New Roman', Times, serif !important;
             font-weight: 700 !important;
             font-size: 0.95em !important;
             padding: 8px 18px !important;
-            box-shadow: 0 2px 12px rgba(251,191,36,0.5) !important;
+            box-shadow: 0 2px 14px rgba(14,165,233,0.35) !important;
         }
         div[data-testid="stButton"] > button[kind="primary"]:hover,
         button[data-testid="stBaseButton-primary"]:hover {
-            background: linear-gradient(135deg, #fde68a 0%, #fbbf24 100%) !important;
-            color: #0f172a !important;
+            background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%) !important;
+            color: #ffffff !important;
+            box-shadow: 0 2px 18px rgba(56,189,248,0.5) !important;
         }
         
         /* --- Headers --- */
@@ -1082,18 +1084,18 @@ def main_dashboard():
             text-align: center !important;
         }
 
-        /* --- Stage-Based Analysis nav button: white outline when inactive --- */
+        /* --- Stage-Based Analysis nav button: ice-blue outline when inactive --- */
         button[data-sba="true"] {
-            border: 1.5px solid #ffffff !important;
-            box-shadow: 0 0 0 1px rgba(255,255,255,0.35) !important;
+            border: 1.5px solid rgba(125,211,252,0.7) !important;
+            box-shadow: 0 0 8px rgba(14,165,233,0.25) !important;
         }
 
-        /* --- BM-tab "assigned category" highlight (gold underline)  --- */
+        /* --- BM-tab "assigned category" highlight (ice-blue underline) --- */
         .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] {
-            border-bottom: 3px solid #fbbf24 !important;
+            border-bottom: 3px solid #38bdf8 !important;
         }
         .stTabs [data-baseweb="tab"][data-valoura-assigned="true"] p {
-            color: #fde68a !important;
+            color: #bae6fd !important;
             font-weight: 700 !important;
         }
 
@@ -1185,6 +1187,7 @@ def main_dashboard():
 
     # --- Horizontal Navigation ---
     PAGES = [
+        "Introduction",
         "Financial Analysis",
         "Stage-Based Analysis",
         "Company Profile",
@@ -1194,7 +1197,7 @@ def main_dashboard():
     OTHER_SUBPAGES = ["DCF Model", "Macro Stress Test"]
 
     if 'active_page' not in st.session_state:
-        st.session_state.active_page = "Financial Analysis"
+        st.session_state.active_page = "Introduction"
     if 'other_subpage' not in st.session_state:
         st.session_state.other_subpage = "DCF Model"
 
@@ -1296,39 +1299,175 @@ def main_dashboard():
             if k in st.session_state:
                 del st.session_state[k]
 
-    # Fetch Data
-    if analyze_now or 'stock_data' in st.session_state:
-        if analyze_now:
-            # 1. Clean the ticker input
-            clean_ticker = str(ticker_symbol).strip().upper()
-            if not clean_ticker:
-                st.error("Ticker symbol is empty. Please enter a valid symbol.")
-                return
-
-            # Clear cache and fetch fresh
-            st.cache_resource.clear()
-            stock, info = fetch_stock_data_v2(clean_ticker)
-
-            if stock is None or info is None:
-                st.error(
-                    f"⚠️ CVE cannot reach any data source for **{clean_ticker}**.\n\n"
-                    f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
-                    f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
-                    f"Go to App Settings → Secrets and add:\n\n"
-                    f"```toml\nALPHA_VANTAGE_KEY = \"your_key_here\"\n```"
-                )
-                st.stop()
-
-            st.session_state.stock_data = (stock, info)
-        else:
-            stock, info = st.session_state.stock_data
-    else:
-        st.info("Enter a ticker and click 'Run Analysis' to begin.")
-        st.stop()
-
     # Dispatch "Other" to its selected subpage before routing
+
+    # --- INTRODUCTION PAGE (no ticker needed — render before data gate) ---
+    if page == "Introduction":
+        _cve_conn = get_db_connection()
+
+        # Header
+        st.markdown(
+            "<div class='fun-header'>Contextual Valuation Engine</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='color:#94a3b8;font-size:1em;margin-top:-12px;margin-bottom:24px;"
+            "font-style:italic;'>Please read before proceeding.</p>",
+            unsafe_allow_html=True,
+        )
+
+        # --- Introduction text ---
+        st.markdown("""
+This introduction serves to explain how to navigate this platform. Here are the primary dashboards:
+
+- **Financial Analysis** — live price data, chart, historical returns, and balance sheet.
+- **Stage-Based Analysis** — the classification and contextual valuation engine.
+- **Company Profile** — business summary, sector, and recent news.
+- **Other** — DCF model and macro stress test tools.
+        """)
+
+        st.markdown("---")
+
+        # Stage-Based Analysis explanation block
+        st.subheader("Stage-Based Analysis")
+        st.markdown("""
+The Stage-Based Analysis layer has been in the works for months. This tab shows the functional interpretation layer and valuation logic that fits each company at any point in its development. It serves as a contextual engine — built on the premise that *valuation without context is noise*.
+
+The right metric for a cash-burning deep tech startup is not the same metric for a cash-compounding enterprise software platform, and applying one framework universally is how private investors end up with misleading conclusions.
+
+A semiconductor company mid-cycle is valued differently from one at cycle peak. A SaaS company with 40% stock-based compensation is not the same business as one with 3%. A hyperscale platform requires segment-level decomposition before a meaningful multiple can be applied. That institutional knowledge is not accessible in most tools built for private investors.
+        """)
+
+        st.subheader("How it works")
+        st.markdown("""
+Every stock ticker is classified across two independent axes: **business model category** and **financial health stage**. The classification determines which valuation metrics apply, what the fair ranges are for those metrics, and which peer group is the meaningful comparison. The result is an analysis that reflects what the company actually is — not a generic score applied uniformly across an entire index.
+
+A synthesis layer reads the full classification, the valuation output, and the peer comparison to produce a plain-English interpretation of where the company stands. Not a buy or sell signal. A clear, evidence-based picture of what the data says.
+        """)
+
+        st.subheader("Status")
+        st.markdown("""
+Currently covers the US technology sector across five business model categories and four financial health stages. Expansion into retail, financial services, healthcare, and industrials is in development. A backtesting layer to validate the classification framework against historical returns is also in progress.
+        """)
+
+        st.subheader("Who it is for")
+        st.markdown("""
+Private investors who want to understand a stock rather than simply be told what to do with it. Anyone who has looked at a P/E ratio and wondered whether it actually means anything for the company they are looking at. Analysts and researchers who want a structured first-pass classification before building their own view.
+        """)
+
+        st.markdown("---")
+
+        # --- Classified Ticker Grid ---
+        st.subheader("Classified Universe")
+        st.caption("Tickers currently covered by the CVE classification engine, grouped by business model and financial health stage.")
+
+        if _cve_conn is not None:
+            import statistics as _stats_intro
+
+            _grid_rows = _cve_conn.execute(
+                "SELECT ticker, matrix_cell, bm_category, fh_stage "
+                "FROM classifications ORDER BY bm_category ASC, fh_stage ASC, ticker ASC"
+            ).fetchall()
+
+            if _grid_rows:
+                # Group by bm_category
+                _by_bm = {}
+                for _t, _cell, _bm, _fh in _grid_rows:
+                    _by_bm.setdefault(_bm, []).append((_t, _cell, _fh))
+
+                _BM_LABELS = {
+                    "hyperscale":        "Hyperscale",
+                    "saas":              "SaaS",
+                    "semi_hardware":     "Semi / Hardware",
+                    "consumer_internet": "Consumer Internet",
+                    "deep_tech":         "Deep Tech",
+                }
+                _STAGE_COLOURS = {
+                    1: "#ef4444",
+                    2: "#f59e0b",
+                    3: "#3b82f6",
+                    4: "#22c55e",
+                }
+                _STAGE_LABELS = {1: "Stage 1", 2: "Stage 2", 3: "Stage 3", 4: "Stage 4"}
+
+                for _bm_key in ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]:
+                    if _bm_key not in _by_bm:
+                        continue
+                    _tickers_in_bm = _by_bm[_bm_key]
+                    _label = _BM_LABELS.get(_bm_key, _bm_key.title())
+
+                    # Category heading
+                    st.markdown(
+                        f"<p style='color:#7dd3fc;font-size:1em;font-weight:700;"
+                        f"letter-spacing:1px;text-transform:uppercase;margin:18px 0 8px 0;"
+                        f"padding-bottom:4px;border-bottom:1px solid rgba(56,189,248,0.2);'>"
+                        f"{_label} — {len(_tickers_in_bm)} tickers</p>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # Pill row
+                    _pills_html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;">'
+                    for _tick, _cell, _fh in _tickers_in_bm:
+                        _col = _STAGE_COLOURS.get(_fh, "#64748b")
+                        _pills_html += (
+                            f'<div title="{_cell}" style="'
+                            f'background:{_col}22;border:1px solid {_col}88;'
+                            f'border-radius:6px;padding:5px 12px;display:inline-block;">'
+                            f'<span style="color:#f1f5f9;font-weight:700;font-size:0.88em;">{_tick}</span>'
+                            f'<span style="color:{_col};font-size:0.72em;margin-left:6px;">{_cell.split("-")[1] if "-" in _cell else ""}</span>'
+                            f'</div>'
+                        )
+                    _pills_html += '</div>'
+                    st.markdown(_pills_html, unsafe_allow_html=True)
+
+                st.markdown(
+                    "<div style='margin-top:16px;display:flex;gap:20px;flex-wrap:wrap;'>"
+                    + "".join(
+                        f'<span style="font-size:0.82em;color:#94a3b8;">'
+                        f'<span style="display:inline-block;width:10px;height:10px;border-radius:2px;'
+                        f'background:{_STAGE_COLOURS[s]};margin-right:4px;"></span>{_STAGE_LABELS[s]}</span>'
+                        for s in [1, 2, 3, 4]
+                    )
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"Total: {len(_grid_rows)} classified tickers across {len(_by_bm)} business model categories.")
+            else:
+                st.info("No tickers classified yet. Run the pipeline to populate the database.")
+        else:
+            st.info("Database not connected. Run `backfill_fh_history.py` and ensure `valoura_backtest.db` is in the app directory.")
+
     if page == "Other":
         page = st.session_state.get("other_subpage", "DCF Model")
+
+    else:
+        # All non-Introduction pages require stock data — gate here
+        if analyze_now or 'stock_data' in st.session_state:
+            if analyze_now:
+                clean_ticker = str(ticker_symbol).strip().upper()
+                if not clean_ticker:
+                    st.error("Ticker symbol is empty. Please enter a valid symbol.")
+                    return
+                st.cache_resource.clear()
+                stock, info = fetch_stock_data_v2(clean_ticker)
+                if stock is None or info is None:
+                    st.error(
+                        f"CVE cannot reach any data source for **{clean_ticker}**.\n\n"
+                        f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
+                        f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
+                        f"Go to App Settings → Secrets and add:\n\n"
+                        f"```toml\nALPHA_VANTAGE_KEY = \"your_key_here\"\n```"
+                    )
+                    return
+                st.session_state.stock_data = (stock, info)
+            else:
+                stock, info = st.session_state.stock_data
+        else:
+            st.info("Enter a ticker and click 'Run Analysis' to begin.")
+            st.stop()
+
+        if False:
+            pass
 
     # --- PAGE 1: Financial Analysis ---
     if page == "Financial Analysis":
@@ -2271,7 +2410,7 @@ def main_dashboard():
                             content   = (
                                 f"{CAT_SHORT[cat]}<br>"
                                 f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span><br>"
-                                f"<span style='font-size:0.92em;color:#fbbf24;font-weight:700;'>▶ {ticker_symbol}</span>"
+                                f"<span style='font-size:0.92em;color:#7dd3fc;font-weight:700;'>▶ {ticker_symbol}</span>"
                             )
                         elif same_stage:
                             # Brighter blue text on dim blue background, grey outline
@@ -2430,7 +2569,7 @@ def main_dashboard():
                                 _delta_sign = "↑" if _delta > 0 else "↓"
                                 _pills_html += (
                                     f'<div style="display:flex;flex-direction:column;align-items:center;'
-                                    f'margin:0 4px;color:#fbbf24;font-size:1.4em;font-weight:800;'
+                                    f'margin:0 4px;color:#38bdf8;font-size:1.4em;font-weight:800;'
                                     f'line-height:1;">'
                                     f'<div>⇒</div>'
                                     f'<div style="font-size:0.55em;color:{_delta_colour};margin-top:2px;'
@@ -2631,7 +2770,7 @@ def main_dashboard():
                     # Addition 3: Full fair-range reference — 3 columns only (no Verdict)
                     fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
                     if fair_rows:
-                        th_s = ("padding:14px 18px;text-align:left;color:#fde68a;"
+                        th_s = ("padding:14px 18px;text-align:left;color:#7dd3fc;"
                                 "font-size:1.05em;font-weight:700;"
                                 "border-bottom:2px solid rgba(251,191,36,0.45);"
                                 "background:rgba(251,191,36,0.08);")
@@ -2649,15 +2788,15 @@ def main_dashboard():
                                 f'<tr>'
                                 f'<td style="{td_s}font-weight:600;">{disp_name}</td>'
                                 f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}{fr_unit}</td>'
-                                f'<td style="{td_s}text-align:center;font-weight:700;color:#fbbf24;">{cur_str}</td>'
+                                f'<td style="{td_s}text-align:center;font-weight:700;color:#38bdf8;">{cur_str}</td>'
                                 f'</tr>'
                             )
                         st.markdown(
                             '<div style="background:rgba(15,23,42,0.6);'
-                            'border:2px solid rgba(251,191,36,0.35);'
+                            'border:2px solid rgba(56,189,248,0.3);'
                             'border-radius:12px;padding:6px;margin:18px 0 8px 0;'
                             'box-shadow:0 4px 14px rgba(0,0,0,0.3);">'
-                            '<div style="font-size:1.3em;font-weight:800;color:#fbbf24;'
+                            '<div style="font-size:1.3em;font-weight:800;color:#7dd3fc;'
                             f'padding:14px 18px 8px 18px;font-family:Times New Roman,Times,serif;">'
                             f'Fair-Range Reference — {matrix_cell}'
                             '</div>'
@@ -2794,7 +2933,7 @@ def main_dashboard():
 
                     _styled = _peer_df.style.apply(
                         lambda row: [
-                            'background-color: rgba(251,191,36,0.22); color: #0f172a; font-weight: 700;'
+                            'background-color: rgba(14,165,233,0.18); color: #ffffff; font-weight: 700;'
                             if row["Ticker"] == ticker_symbol else ''
                             for _ in row
                         ],
@@ -2855,7 +2994,7 @@ def main_dashboard():
 
                         _styled = _peer_df.style.apply(
                             lambda row: [
-                                'background-color: rgba(251,191,36,0.22); color: #0f172a; font-weight: 700;'
+                                'background-color: rgba(14,165,233,0.18); color: #ffffff; font-weight: 700;'
                                 if row["Ticker"] == ticker_symbol else ''
                                 for _ in row
                             ],
