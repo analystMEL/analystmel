@@ -982,7 +982,27 @@ def main_dashboard():
             opacity: 1 !important;
             stroke: #ffffff !important;
         }
-        /* Tooltip popup itself — make sure markdown lists render with visible bullets */
+        /* Tooltip popup — expand to show all text, wrap properly */
+        [data-baseweb="tooltip"],
+        [role="tooltip"],
+        div[data-baseweb="tooltip"],
+        div[role="tooltip"] {
+            max-width: 420px !important;
+            width: max-content !important;
+            white-space: normal !important;
+            word-wrap: break-word !important;
+            overflow-wrap: break-word !important;
+            overflow: visible !important;
+        }
+        [data-baseweb="tooltip"] div,
+        [role="tooltip"] div {
+            max-width: 420px !important;
+            white-space: normal !important;
+            word-wrap: break-word !important;
+            overflow: visible !important;
+            line-height: 1.5 !important;
+            font-size: 0.82em !important;
+        }
         [data-baseweb="tooltip"] ul,
         [role="tooltip"] ul {
             padding-left: 18px !important;
@@ -991,7 +1011,8 @@ def main_dashboard():
         [data-baseweb="tooltip"] li,
         [role="tooltip"] li {
             margin: 4px 0 !important;
-            line-height: 1.45 !important;
+            line-height: 1.5 !important;
+            white-space: normal !important;
         }
 
         /* --- Nav pills rendered as st.buttons (AJAX rerun, no full reload) --- */
@@ -2933,7 +2954,7 @@ Private investors who want to understand a stock rather than simply be told what
 
                     _styled = _peer_df.style.apply(
                         lambda row: [
-                            'background-color: rgba(14,165,233,0.18); color: #ffffff; font-weight: 700;'
+                            'background-color: rgba(14,165,233,0.28); color: #000000; font-weight: 800;'
                             if row["Ticker"] == ticker_symbol else ''
                             for _ in row
                         ],
@@ -2994,7 +3015,7 @@ Private investors who want to understand a stock rather than simply be told what
 
                         _styled = _peer_df.style.apply(
                             lambda row: [
-                                'background-color: rgba(14,165,233,0.18); color: #ffffff; font-weight: 700;'
+                                'background-color: rgba(14,165,233,0.28); color: #000000; font-weight: 800;'
                                 if row["Ticker"] == ticker_symbol else ''
                                 for _ in row
                             ],
