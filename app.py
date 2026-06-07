@@ -1131,11 +1131,61 @@ def main_dashboard():
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        /* Force borders on DataFrames */
-        .stDataFrame, div[data-testid="stTable"] {
-            border: 2px solid #3a506b;
-            border-radius: 10px;
-            overflow: hidden;
+        /* --- DataFrame / Table — cold dark theme --------------------------------- */
+        /* Outer wrapper */
+        .stDataFrame,
+        div[data-testid="stTable"] {
+            border: 1px solid rgba(56,189,248,0.2) !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+        }
+        /* Glide element (the actual scrollable frame Streamlit wraps the table in) */
+        .stDataFrame [data-testid="stDataFrameResizable"],
+        .stDataFrame iframe {
+            background: transparent !important;
+        }
+        /* Column headers — dark navy with ice-blue text */
+        .stDataFrame th,
+        .stDataFrame [role="columnheader"],
+        .stDataFrame .dvn-scroller th {
+            background-color: #050d1a !important;
+            color: #7dd3fc !important;
+            font-weight: 700 !important;
+            border-bottom: 1px solid rgba(56,189,248,0.25) !important;
+            border-right: 1px solid rgba(56,189,248,0.1) !important;
+        }
+        /* Data cells */
+        .stDataFrame td,
+        .stDataFrame [role="gridcell"],
+        .stDataFrame .dvn-scroller td {
+            background-color: #0a1628 !important;
+            color: #e2e8f0 !important;
+            border-bottom: 1px solid rgba(56,189,248,0.08) !important;
+            border-right: 1px solid rgba(56,189,248,0.05) !important;
+        }
+        /* Row hover */
+        .stDataFrame tr:hover td,
+        .stDataFrame [role="row"]:hover [role="gridcell"] {
+            background-color: rgba(14,165,233,0.08) !important;
+        }
+        /* Index column */
+        .stDataFrame [role="rowheader"],
+        .stDataFrame .dvn-scroller [role="rowheader"] {
+            background-color: #050d1a !important;
+            color: #94a3b8 !important;
+            border-right: 1px solid rgba(56,189,248,0.15) !important;
+        }
+        /* Scrollbar */
+        .stDataFrame ::-webkit-scrollbar {
+            height: 5px !important;
+            width: 5px !important;
+        }
+        .stDataFrame ::-webkit-scrollbar-track {
+            background: #050d1a !important;
+        }
+        .stDataFrame ::-webkit-scrollbar-thumb {
+            background: rgba(56,189,248,0.3) !important;
+            border-radius: 4px !important;
         }
         .stChart {
             border: 1px solid rgba(255, 255, 255, 0.1);
