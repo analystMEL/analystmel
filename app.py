@@ -27,6 +27,47 @@ def get_db_connection():
         return None
     return sqlite3.connect(db_path, check_same_thread=False)
 
+
+def render_dark_table(headers, rows, highlight_first_col=None):
+    """Render a cold-themed HTML table via st.markdown.
+
+    Streamlit's st.dataframe renders to a canvas (glide-data-grid) which
+    ignores page CSS, so it always shows light. This helper renders a real
+    HTML <table> that inherits the black / cold-navy / ice-blue scheme.
+
+    headers:            list of column header strings.
+    rows:               list of row-lists; each cell is a pre-formatted string.
+    highlight_first_col: if set, any row whose first cell equals this value is
+                         highlighted (solid ice-blue background, black bold text).
+    """
+    th_s = ("padding:11px 16px;text-align:left;color:#7dd3fc;font-size:0.9em;"
+            "font-weight:700;background:#050d1a;white-space:nowrap;"
+            "border-bottom:1px solid rgba(56,189,248,0.3);")
+    td_base = ("padding:10px 16px;font-size:0.88em;color:#e2e8f0;"
+               "border-bottom:1px solid rgba(56,189,248,0.08);")
+    td_hl = ("padding:10px 16px;font-size:0.88em;color:#000000;font-weight:800;"
+             "background:rgba(56,189,248,0.85);"
+             "border-bottom:1px solid rgba(56,189,248,0.3);")
+
+    header_html = "".join(f'<th style="{th_s}">{h}</th>' for h in headers)
+    body_html = ""
+    for row in rows:
+        _hl = (highlight_first_col is not None
+               and len(row) > 0 and str(row[0]) == str(highlight_first_col))
+        _td = td_hl if _hl else td_base
+        cells = "".join(f'<td style="{_td}">{c}</td>' for c in row)
+        body_html += f"<tr>{cells}</tr>"
+
+    st.markdown(
+        '<div style="overflow-x:auto;margin:8px 0 4px 0;'
+        'border:1px solid rgba(56,189,248,0.2);border-radius:8px;background:#0a1628;">'
+        '<table style="border-collapse:collapse;width:100%;">'
+        f'<thead><tr>{header_html}</tr></thead>'
+        f'<tbody>{body_html}</tbody>'
+        '</table></div>',
+        unsafe_allow_html=True,
+    )
+
 # --- SPLASH SCREEN LOGIC ---
 def splash_screen():
     # Custom CSS for the Splash Screen
@@ -1131,61 +1172,11 @@ def main_dashboard():
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        /* --- DataFrame / Table — cold dark theme --------------------------------- */
-        /* Outer wrapper */
-        .stDataFrame,
-        div[data-testid="stTable"] {
-            border: 1px solid rgba(56,189,248,0.2) !important;
-            border-radius: 8px !important;
-            overflow: hidden !important;
-        }
-        /* Glide element (the actual scrollable frame Streamlit wraps the table in) */
-        .stDataFrame [data-testid="stDataFrameResizable"],
-        .stDataFrame iframe {
-            background: transparent !important;
-        }
-        /* Column headers — dark navy with ice-blue text */
-        .stDataFrame th,
-        .stDataFrame [role="columnheader"],
-        .stDataFrame .dvn-scroller th {
-            background-color: #050d1a !important;
-            color: #7dd3fc !important;
-            font-weight: 700 !important;
-            border-bottom: 1px solid rgba(56,189,248,0.25) !important;
-            border-right: 1px solid rgba(56,189,248,0.1) !important;
-        }
-        /* Data cells */
-        .stDataFrame td,
-        .stDataFrame [role="gridcell"],
-        .stDataFrame .dvn-scroller td {
-            background-color: #0a1628 !important;
-            color: #e2e8f0 !important;
-            border-bottom: 1px solid rgba(56,189,248,0.08) !important;
-            border-right: 1px solid rgba(56,189,248,0.05) !important;
-        }
-        /* Row hover */
-        .stDataFrame tr:hover td,
-        .stDataFrame [role="row"]:hover [role="gridcell"] {
-            background-color: rgba(14,165,233,0.08) !important;
-        }
-        /* Index column */
-        .stDataFrame [role="rowheader"],
-        .stDataFrame .dvn-scroller [role="rowheader"] {
-            background-color: #050d1a !important;
-            color: #94a3b8 !important;
-            border-right: 1px solid rgba(56,189,248,0.15) !important;
-        }
-        /* Scrollbar */
-        .stDataFrame ::-webkit-scrollbar {
-            height: 5px !important;
-            width: 5px !important;
-        }
-        .stDataFrame ::-webkit-scrollbar-track {
-            background: #050d1a !important;
-        }
-        .stDataFrame ::-webkit-scrollbar-thumb {
-            background: rgba(56,189,248,0.3) !important;
-            border-radius: 4px !important;
+        /* Force borders on any remaining native DataFrames (other pages) */
+        .stDataFrame, div[data-testid="stTable"] {
+            border: 1px solid rgba(56,189,248,0.2);
+            border-radius: 8px;
+            overflow: hidden;
         }
         .stChart {
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2525,7 +2516,10 @@ Private investors who want to understand a stock rather than simply be told what
                     "Weight":       "—",
                     "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
                 })
-                st.dataframe(pd.DataFrame(_fh_table_rows), use_container_width=True, hide_index=True)
+                render_dark_table(
+                    ["Metric", "Sub-score", "Weight", "Contribution"],
+                    [[r["Metric"], r["Sub-score"], r["Weight"], r["Contribution"]] for r in _fh_table_rows],
+                )
 
                 # Always-visible FCF hard-cap status banner
                 if fh_fcf_hard_cap:
@@ -2746,7 +2740,10 @@ Private investors who want to understand a stock rather than simply be told what
                                 "Conf.":     f"{v.get('confidence', 0):.1f}",
                                 "Rationale": v.get("rationale", "—"),
                             })
-                        st.dataframe(pd.DataFrame(val_rows_display), use_container_width=True, hide_index=True)
+                        render_dark_table(
+                            ["Category", "Result", "Conf.", "Rationale"],
+                            [[v["Category"], v["Result"], v["Conf."], v["Rationale"]] for v in val_rows_display],
+                        )
 
                     if bm_method == "llm_tiebreaker":
                         st.info("🤖 LLM was invoked to break a validator tie.")
@@ -2968,28 +2965,20 @@ Private investors who want to understand a stock rather than simply be told what
                         (matrix_cell,),
                     ).fetchall()
 
-                    _peer_records = []
+                    _headers_a = ["Ticker", "FH Stage", "FCF Margin (adj)", "Gross Margin",
+                                  "Rev Growth YoY", "Op Leverage", _disp_name]
+                    _rows_a = []
                     for r in _peer_rows_raw:
-                        _peer_records.append({
-                            "Ticker":           r[0],
-                            "FH Stage":         f"Stage {int(r[1])}" if r[1] is not None else "—",
-                            "FCF Margin (adj)": _fmt_pct(r[2]),
-                            "Gross Margin":     _fmt_pct(r[3]),
-                            "Rev Growth YoY":   _fmt_pct(r[4]),
-                            "Op Leverage":      _fmt_pp(r[5]),
-                            _disp_name:         _fmt_unit(r[6], _u),
-                        })
-                    _peer_df = pd.DataFrame(_peer_records)
-
-                    _styled = _peer_df.style.apply(
-                        lambda row: [
-                            'background-color: rgba(14,165,233,0.28); color: #000000; font-weight: 800;'
-                            if row["Ticker"] == ticker_symbol else ''
-                            for _ in row
-                        ],
-                        axis=1,
-                    )
-                    st.dataframe(_styled, use_container_width=True, hide_index=True)
+                        _rows_a.append([
+                            r[0],
+                            f"Stage {int(r[1])}" if r[1] is not None else "—",
+                            _fmt_pct(r[2]),
+                            _fmt_pct(r[3]),
+                            _fmt_pct(r[4]),
+                            _fmt_pp(r[5]),
+                            _fmt_unit(r[6], _u),
+                        ])
+                    render_dark_table(_headers_a, _rows_a, highlight_first_col=ticker_symbol)
                     st.caption(
                         f"Peers in matrix cell **{matrix_cell}** — valued on the cell's primary method ({_primary_method}). "
                         f"Fair range for {_disp_name}: {_lo}–{_hi}{_u}."
@@ -3026,33 +3015,26 @@ Private investors who want to understand a stock rather than simply be told what
                     ).fetchall()
 
                     if len(_peer_rows_raw) > 1:
-                        _peer_records = []
+                        _headers_b = (["Ticker", "Matrix Cell", "FH Stage", "FCF Margin (adj)",
+                                       "Gross Margin", "Rev Growth YoY", "Op Leverage"]
+                                      + [lbl for (_k, lbl, _u) in _bm_cols])
+                        _rows_b = []
                         for r in _peer_rows_raw:
-                            row = {
-                                "Ticker":           r[0],
-                                "Matrix Cell":      r[1],
-                                "FH Stage":         f"Stage {int(r[2])}" if r[2] is not None else "—",
-                                "FCF Margin (adj)": _fmt_pct(r[3]),
-                                "Gross Margin":     _fmt_pct(r[4]),
-                                "Rev Growth YoY":   _fmt_pct(r[5]),
-                                "Op Leverage":      _fmt_pp(r[6]),
-                            }
+                            _row = [
+                                r[0],
+                                r[1],
+                                f"Stage {int(r[2])}" if r[2] is not None else "—",
+                                _fmt_pct(r[3]),
+                                _fmt_pct(r[4]),
+                                _fmt_pct(r[5]),
+                                _fmt_pp(r[6]),
+                            ]
                             for _i, (_k, _label, _u) in enumerate(_bm_cols):
-                                row[_label] = _fmt_unit(r[7 + _i], _u)
-                            _peer_records.append(row)
-                        _peer_df = pd.DataFrame(_peer_records)
-
-                        _styled = _peer_df.style.apply(
-                            lambda row: [
-                                'background-color: rgba(14,165,233,0.28); color: #000000; font-weight: 800;'
-                                if row["Ticker"] == ticker_symbol else ''
-                                for _ in row
-                            ],
-                            axis=1,
-                        )
-                        st.dataframe(_styled, use_container_width=True, hide_index=True)
+                                _row.append(_fmt_unit(r[7 + _i], _u))
+                            _rows_b.append(_row)
+                        render_dark_table(_headers_b, _rows_b, highlight_first_col=ticker_symbol)
                         st.caption(
-                            f"Showing {len(_peer_df)} **{_bm_label}** tickers. "
+                            f"Showing {len(_rows_b)} **{_bm_label}** tickers. "
                             f"Same-stage peers grouped first."
                         )
                     else:
