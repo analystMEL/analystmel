@@ -2148,19 +2148,21 @@ Private investors who want to understand a stock rather than simply be told what
             for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
                 _cur = _cur_vals.get(_col)
                 _med = _medians.get(_col)
+                # Unit lives in the label, not in the value/delta
+                _label_with_unit = f"{_label} ({_unit})"
                 with _cols_ui[_idx]:
                     if _cur is None:
-                        st.metric(_label, "—", help=_tip)
+                        st.metric(_label_with_unit, "—", help=_tip)
                     else:
-                        _value_str = f"{_cur:.1f}%" if _unit == "%" else f"{_cur:.1f}pp"
+                        _value_str = f"{_cur:.1f}"
                         if _med is not None:
                             _delta = _cur - _med
-                            _delta_str = f"{_delta:+.1f}{_unit} vs median ({_med:.1f}{_unit})"
+                            _delta_str = f"{_delta:+.1f} vs median ({_med:.1f})"
                             # delta_color="normal" → green if positive, red if negative.
                             # All 4 metrics are "higher is better" so default is correct.
-                            st.metric(_label, _value_str, delta=_delta_str, help=_tip)
+                            st.metric(_label_with_unit, _value_str, delta=_delta_str, help=_tip)
                         else:
-                            st.metric(_label, _value_str, help=_tip)
+                            st.metric(_label_with_unit, _value_str, help=_tip)
 
             st.markdown("---")
 
@@ -2507,7 +2509,7 @@ Private investors who want to understand a stock rather than simply be told what
                     _fh_table_rows.append({
                         "Metric":       _m_name,
                         "Sub-score":    _sub_score,
-                        "Weight":       f"{_w:.0%}" if _w > 0 else "—",
+                        "Weight":       f"{_w*100:.0f}" if _w > 0 else "—",
                         "Contribution": f"{_contrib:.3f}" if _contrib is not None else "—",
                     })
                 _fh_table_rows.append({
@@ -2517,7 +2519,7 @@ Private investors who want to understand a stock rather than simply be told what
                     "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
                 })
                 render_dark_table(
-                    ["Metric", "Sub-score", "Weight", "Contribution"],
+                    ["Metric", "Sub-score (1–4)", "Weight (%)", "Contribution"],
                     [[r["Metric"], r["Sub-score"], r["Weight"], r["Contribution"]] for r in _fh_table_rows],
                 )
 
@@ -2819,22 +2821,23 @@ Private investors who want to understand a stock rather than simply be told what
                     if fair_rows:
                         th_s = ("padding:14px 18px;text-align:left;color:#7dd3fc;"
                                 "font-size:1.05em;font-weight:700;"
-                                "border-bottom:2px solid rgba(251,191,36,0.45);"
-                                "background:rgba(251,191,36,0.08);")
+                                "border-bottom:2px solid rgba(56,189,248,0.35);"
+                                "background:rgba(14,165,233,0.07);")
                         td_s = ("padding:13px 18px;font-size:1.02em;font-weight:500;"
                                 "border-bottom:1px solid #334155;color:#f1f5f9;")
                         rows_html = []
                         for (disp_name, val_key, fr_low, fr_high, fr_unit, kind) in fair_rows:
                             cur_raw = val_data.get(val_key)
+                            # Unit lives in the Metric name now — strip from values
                             cur_str = "—" if cur_raw is None else (
-                                f"{float(cur_raw):.1f}{fr_unit}"
+                                f"{float(cur_raw):.1f}"
                                 if isinstance(cur_raw, (int, float))
                                 else str(cur_raw)
                             )
                             rows_html.append(
                                 f'<tr>'
-                                f'<td style="{td_s}font-weight:600;">{disp_name}</td>'
-                                f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}{fr_unit}</td>'
+                                f'<td style="{td_s}font-weight:600;">{disp_name} ({fr_unit})</td>'
+                                f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}</td>'
                                 f'<td style="{td_s}text-align:center;font-weight:700;color:#38bdf8;">{cur_str}</td>'
                                 f'</tr>'
                             )
@@ -2902,19 +2905,19 @@ Private investors who want to understand a stock rather than simply be told what
                     ],
                 }
 
-                # Shared formatters
+                # Shared formatters — UNIT-LESS (the unit lives in the column header now)
                 def _fmt_pct(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
                 def _fmt_pp(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}pp"
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
                 def _fmt_x(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.2f}x"
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.2f}"
                 def _fmt_unit(v, unit):
                     if v is None or pd.isna(v):
                         return "—"
                     if unit == "%":
-                        return f"{float(v):.1f}%"
-                    return f"{float(v):.2f}x"
+                        return f"{float(v):.1f}"
+                    return f"{float(v):.2f}"
 
                 # How many tickers share the current matrix_cell?
                 _cell_count = conn_vb.execute(
@@ -2965,8 +2968,8 @@ Private investors who want to understand a stock rather than simply be told what
                         (matrix_cell,),
                     ).fetchall()
 
-                    _headers_a = ["Ticker", "FH Stage", "FCF Margin (adj)", "Gross Margin",
-                                  "Rev Growth YoY", "Op Leverage", _disp_name]
+                    _headers_a = ["Ticker", "FH Stage", "FCF Margin adj (%)", "Gross Margin (%)",
+                                  "Rev Growth YoY (%)", "Op Leverage (pp)", f"{_disp_name} ({_u})"]
                     _rows_a = []
                     for r in _peer_rows_raw:
                         _rows_a.append([
@@ -3015,9 +3018,9 @@ Private investors who want to understand a stock rather than simply be told what
                     ).fetchall()
 
                     if len(_peer_rows_raw) > 1:
-                        _headers_b = (["Ticker", "Matrix Cell", "FH Stage", "FCF Margin (adj)",
-                                       "Gross Margin", "Rev Growth YoY", "Op Leverage"]
-                                      + [lbl for (_k, lbl, _u) in _bm_cols])
+                        _headers_b = (["Ticker", "Matrix Cell", "FH Stage", "FCF Margin adj (%)",
+                                       "Gross Margin (%)", "Rev Growth YoY (%)", "Op Leverage (pp)"]
+                                      + [f"{lbl} ({_u})" for (_k, lbl, _u) in _bm_cols])
                         _rows_b = []
                         for r in _peer_rows_raw:
                             _row = [
