@@ -68,6 +68,12 @@ MANUAL_BM_OVERRIDES = {
     "SNAP":  "consumer_internet", # was deep_tech-3 — social ad platform (AR is a feature)
     "MDB":   "saas",              # was deep_tech-2 — MongoDB Atlas is subscription DB
     "DOCN":  "saas",              # was consumer_internet-3 — DigitalOcean dev-infra SaaS
+    # ── "Neocloud" AI hyperscalers — own physical GPU data centres, usage-based
+    # compute revenue, extreme CapEx. Validators misread their SaaS-like margins
+    # (CRWV has only 10 quarters of post-IPO data) but the business model is
+    # textbook hyperscale infrastructure.
+    "CRWV":  "hyperscale",        # was saas-1 — CoreWeave GPU cloud
+    "NBIS":  "hyperscale",        # was deep_tech-1 — Nebius AI cloud
 }
 
 # Populated at runtime: tickers whose AV fundamentals come back in a non-USD
