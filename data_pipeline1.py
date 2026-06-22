@@ -63,6 +63,7 @@ MANUAL_BM_OVERRIDES = {
     # Policy: always override when LLM confidence is LOW and the resulting
     # category disagrees with the company's primary business model.
     "INTC":  "semi_hardware",     # was deep_tech-3 — Intel is the canonical semi co.
+    "ADI":   "semi_hardware",     # was deep_tech-3 — Analog Devices, major analog semi co.
     "BKSY":  "deep_tech",         # was consumer_internet-1 — satellite imaging
     "DASH":  "consumer_internet", # was deep_tech-3 — gig-economy marketplace
     "SNAP":  "consumer_internet", # was deep_tech-3 — social ad platform (AR is a feature)
