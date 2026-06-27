@@ -66,6 +66,7 @@ MANUAL_BM_OVERRIDES = {
     "ADI":   "semi_hardware",     # was deep_tech-3 — Analog Devices, major analog semi co.
     "BKSY":  "deep_tech",         # was consumer_internet-1 — satellite imaging
     "DASH":  "consumer_internet", # was deep_tech-3 — gig-economy marketplace
+    "TTWO":  "consumer_internet", # was deep_tech-2 — Take-Two video-game publisher (like EA)
     "SNAP":  "consumer_internet", # was deep_tech-3 — social ad platform (AR is a feature)
     "MDB":   "saas",              # was deep_tech-2 — MongoDB Atlas is subscription DB
     "DOCN":  "saas",              # was consumer_internet-3 — DigitalOcean dev-infra SaaS
