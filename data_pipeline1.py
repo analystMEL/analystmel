@@ -85,6 +85,29 @@ MANUAL_BM_OVERRIDES = {
 # (period-average rate for flow items, period-end rate for BS items) — not yet.
 EXCLUDED_TICKERS_NON_USD: set[str] = set()
 
+# Stage changes detected during this pipeline run (ticker / previous / new / cell).
+# Written to Supabase stage_change_log as they happen; kept here for reporting.
+STAGE_CHANGES_THIS_RUN: list = []
+
+
+def _get_supabase_client_module():
+    """Import supabase_client (lives in the UI folder) with a path fallback.
+    Returns the module or None — never raises."""
+    try:
+        import supabase_client
+        return supabase_client
+    except ImportError:
+        pass
+    try:
+        import sys as _sys, os as _os
+        _ui_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Valuora_Previous_UI")
+        if _ui_dir not in _sys.path:
+            _sys.path.insert(0, _ui_dir)
+        import supabase_client
+        return supabase_client
+    except Exception:
+        return None
+
 TICKERS = [
     # Pure SaaS
     "PANW", "CRM", "WDAY", "ADBE", "TEAM", "MDB", "NET", "DOCN", "ZS", "SNOW",  # CFLT removed — taken private 2026
@@ -1810,6 +1833,13 @@ def run_classification(conn: sqlite3.Connection, ticker: str) -> bool:
     matrix_cell = f"{bm['bm_category']}-{fh['fh_stage']}"
     classified_at = datetime.utcnow().isoformat()
 
+    # Stage-change detection: read the PREVIOUS stage before we overwrite it.
+    _prev_row = cursor.execute(
+        "SELECT fh_stage FROM classifications WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 1",
+        (ticker,)
+    ).fetchone()
+    _prev_stage = _prev_row[0] if _prev_row else None
+
     cursor.execute("""
         INSERT OR REPLACE INTO classifications (
             ticker, as_of_date,
@@ -1849,6 +1879,26 @@ def run_classification(conn: sqlite3.Connection, ticker: str) -> bool:
         log.info(f"[{ticker}] FH trajectory refreshed: {n_written} quarter(s) written.")
     except Exception as e:
         log.warning(f"[{ticker}] FH history refresh failed: {e}")
+
+    # Step 5: stage-change detection → Supabase stage_change_log + alert emails.
+    # Powers the app's "Recently moved" section and watchlist alerts.
+    # Fully wrapped: an offline run or unconfigured Supabase never breaks the pipeline.
+    if _prev_stage is not None and _prev_stage != fh["fh_stage"]:
+        log.info(f"[{ticker}] STAGE CHANGE detected: {_prev_stage} → {fh['fh_stage']}")
+        change = {
+            "ticker": ticker,
+            "previous_stage": _prev_stage,
+            "new_stage": fh["fh_stage"],
+            "matrix_cell": matrix_cell,
+        }
+        STAGE_CHANGES_THIS_RUN.append(change)
+        try:
+            _sbc = _get_supabase_client_module()
+            if _sbc is not None:
+                _sbc.log_stage_change(ticker, _prev_stage, fh["fh_stage"], matrix_cell)
+                _sbc.send_stage_change_alerts([change])
+        except Exception as e:
+            log.warning(f"[{ticker}] Supabase stage-change hook failed: {e}")
 
     return True
 

@@ -9,3 +9,5 @@ numpy>=1.26.0
 plotly>=5.20.0
 requests>=2.31.0
 matplotlib>=3.8.0
+supabase>=2.0.0
+gotrue>=2.0.0

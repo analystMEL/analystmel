@@ -68,6 +68,155 @@ def render_dark_table(headers, rows, highlight_first_col=None):
         unsafe_allow_html=True,
     )
 
+
+# ---------------------------------------------------------------------------
+# Fair-range reference per matrix cell — shared by Analysis, Home, Watchlist.
+# Each tuple: (display_name, val_data_key, low, high, unit, kind)
+# kind: "multiple" (higher=expensive), "yield" (higher=cheaper), "score" (higher=better)
+# ---------------------------------------------------------------------------
+FAIR_RANGES_FULL = {
+    "hyperscale-4": [
+        ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
+        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
+    ],
+    "hyperscale-3": [
+        ("CapEx EV/EBIT","capex_adj_ev_ebit",  20,  35,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         25,  45,  "%", "score"),
+    ],
+    "hyperscale-2": [
+        ("CapEx EV/EBIT","capex_adj_ev_ebit",  40,  80,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
+    ],
+    "hyperscale-1": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         6,   15,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
+    ],
+    "saas-4": [
+        ("FCF Yield",    "fcf_yield",          1.0, 2.5, "%", "yield"),
+        ("EV/FCF",       "ev_fcf",             20,  35,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         40,  60,  "%", "score"),
+    ],
+    "saas-3": [
+        ("EV/FCF",       "ev_fcf",             25,  45,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          0.8, 2.0, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
+    ],
+    "saas-2": [
+        ("EV/NTM ARR",   "ev_ntm_arr",         8,   18,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
+    ],
+    "saas-1": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         8,   20,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
+    ],
+    "semi_hardware-4": [
+        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
+        ("PEG",          "peg_ratio",          0.5, 1.2, "x", "multiple"),
+    ],
+    "semi_hardware-3": [
+        ("Cycle P/E",    "cycle_adj_pe",       20,  35,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         25,  50,  "%", "score"),
+    ],
+    "semi_hardware-2": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         1.5, 4.0, "x", "multiple"),
+    ],
+    "semi_hardware-1": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         0.5, 2.0, "x", "multiple"),
+    ],
+    "consumer_internet-4": [
+        ("EV/EBITDA",    "ev_ebitda",          12,  18,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          0.8, 1.5, "x", "multiple"),
+    ],
+    "consumer_internet-3": [
+        ("EV/EBITDA",    "ev_ebitda",          18,  30,  "x", "multiple"),
+        ("PEG",          "peg_ratio",          1.0, 2.5, "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         20,  40,  "%", "score"),
+    ],
+    "consumer_internet-2": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         4,   10,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
+    ],
+    "consumer_internet-1": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         1,   5,   "x", "multiple"),
+    ],
+    "deep_tech-4": [
+        ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
+    ],
+    "deep_tech-3": [
+        ("EV/GP",        "ev_gross_profit",    15,  30,  "x", "multiple"),
+        ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
+    ],
+    "deep_tech-2": [
+        ("EV/NTM Rev",   "ev_ntm_arr",         5,   12,  "x", "multiple"),
+    ],
+    "deep_tech-1": [
+        ("P/S",          "ps_ratio",           20,  60,  "x", "multiple"),
+    ],
+}
+
+
+def derive_verdict(matrix_cell, val_data):
+    """Verdict from the cell's PRIMARY metric (first FAIR_RANGES_FULL row).
+
+    Returns (verdict, metric_display_name, value) where verdict is
+    "Undervalued" | "Fair" | "Overvalued" | None (no data).
+    """
+    fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
+    if not fair_rows:
+        return None, None, None
+    disp, key, lo, hi, unit, kind = fair_rows[0]
+    v = (val_data or {}).get(key)
+    if v is None:
+        return None, disp, None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None, disp, None
+    if kind in ("yield", "score"):
+        verdict = "Fair" if lo <= f <= hi else ("Undervalued" if f > hi else "Overvalued")
+    else:  # multiple — lower is cheaper
+        verdict = "Fair" if lo <= f <= hi else ("Undervalued" if f < lo else "Overvalued")
+    return verdict, disp, f
+
+
+def get_active_flags(conn, ticker):
+    """Synthesized risk flags (the DB has no FLAG_ rows — derive from quality signals).
+
+    Returns list of (flag_name, one_line_description).
+    """
+    flags = []
+    try:
+        m = conn.execute(
+            "SELECT net_income_quality_flag, is_self_funded FROM computed_metrics WHERE ticker=?",
+            (ticker,)).fetchone()
+        c = conn.execute(
+            "SELECT fh_fcf_hard_cap_applied FROM classifications WHERE ticker=?",
+            (ticker,)).fetchone()
+        v = conn.execute(
+            "SELECT valuation_json FROM valuations WHERE ticker=?", (ticker,)).fetchone()
+        if m and m[0]:
+            flags.append(("Net income quality",
+                          "Reported net income diverges sharply from operating income — P/E-style multiples may mislead."))
+        if m and m[1] == 0:
+            flags.append(("Not self-funded",
+                          "Negative free cash flow — the company depends on external financing."))
+        if c and c[0]:
+            flags.append(("FCF hard-cap applied",
+                          "Deeply negative FCF margin capped the health stage at Stage 2."))
+        if v and v[0]:
+            _vj = json.loads(v[0])
+            if _vj.get("rpo_qualifier") == "forward_demand_decelerating":
+                flags.append(("Forward demand decelerating",
+                              "RPO growth is trailing revenue growth — forward demand may be softening."))
+    except Exception:
+        pass
+    return flags
+
+
 # --- SPLASH SCREEN LOGIC ---
 def splash_screen():
     # Custom CSS for the Splash Screen
@@ -874,6 +1023,334 @@ def fetch_stock_data_v2(ticker_symbol):
     st.session_state['yf_status'] = "🔴 All sources blocked"
     return None, None
 
+
+# ==========================================================================
+# AUTH — login / signup pages (Supabase Auth, email + password)
+# ==========================================================================
+_AUTH_CSS = """
+<style>
+    .stApp {
+        background: linear-gradient(160deg, #000000 0%, #050d1a 40%, #0a1628 75%, #0f2040 100%);
+        color: #ffffff;
+    }
+    [data-testid="stSidebar"], [data-testid="stSidebarCollapseButton"],
+    [data-testid="collapsedControl"] { display: none !important; }
+    .main .block-container { padding-top: 2.5rem !important; max-width: 480px !important; }
+    .auth-brand {
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 1.6em; font-weight: 700; color: #ffffff;
+        letter-spacing: 2px; text-transform: uppercase; text-align: center;
+        padding: 18px 0 4px 0;
+    }
+    .auth-sub { color: #7dd3fc; text-align: center; font-size: 0.9em;
+                margin-bottom: 18px; font-style: italic; }
+    .stTextInput input {
+        color: #FFFFFF !important; background-color: #0a1628 !important;
+        border: 1px solid rgba(56,189,248,0.25) !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }
+    .stMarkdown p { color: #e2e8f0 !important; }
+    h1,h2,h3 { color: #ffffff !important; font-family: 'Times New Roman', Times, serif; }
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 50%, #0369a1 100%) !important;
+        color: #ffffff !important; border: 1px solid rgba(125,211,252,0.6) !important;
+        border-radius: 8px !important; font-weight: 700 !important; width: 100%;
+    }
+    div[data-testid="stButton"] > button[kind="secondary"] {
+        background: rgba(255,255,255,0.06) !important; color: #cbd5e1 !important;
+        border: 1px solid rgba(255,255,255,0.14) !important; border-radius: 8px !important;
+        width: 100%;
+    }
+</style>
+"""
+
+
+def render_auth_page():
+    """Login / signup wall. Sets st.session_state.user on success."""
+    from supabase_client import sign_in, sign_up
+
+    st.markdown(_AUTH_CSS, unsafe_allow_html=True)
+    st.markdown('<div class="auth-brand">Contextual Valuation Engine</div>', unsafe_allow_html=True)
+    st.markdown('<div class="auth-sub">Stage-aware valuation for technology stocks</div>', unsafe_allow_html=True)
+
+    if 'auth_mode' not in st.session_state:
+        st.session_state.auth_mode = "login"
+
+    if st.session_state.auth_mode == "login":
+        st.subheader("Log in")
+        with st.form("login_form"):
+            email = st.text_input("Email", placeholder="you@example.com")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
+        if submitted:
+            if not email or not password:
+                st.error("Enter both email and password.")
+            else:
+                user, err = sign_in(email.strip(), password)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.active_page = "Home"
+                    st.rerun()
+                else:
+                    st.error(err)
+        st.markdown("---")
+        if st.button("New here? Create an account", use_container_width=True):
+            st.session_state.auth_mode = "signup"
+            st.rerun()
+
+    else:  # signup
+        st.subheader("Create account")
+        with st.form("signup_form"):
+            display_name = st.text_input("Display name", placeholder="How should we greet you?")
+            email = st.text_input("Email", placeholder="you@example.com")
+            password = st.text_input("Password", type="password",
+                                     help="At least 6 characters")
+            confirm = st.text_input("Confirm password", type="password")
+            submitted = st.form_submit_button("Sign up", type="primary", use_container_width=True)
+        if submitted:
+            if not (display_name and email and password and confirm):
+                st.error("All fields are required.")
+            elif password != confirm:
+                st.error("Passwords do not match.")
+            elif len(password) < 6:
+                st.error("Password must be at least 6 characters.")
+            else:
+                user, err = sign_up(email.strip(), password, display_name.strip())
+                if user:
+                    st.session_state.user = user
+                    st.session_state.active_page = "Home"
+                    st.rerun()
+                else:
+                    # err may be the "confirm your email" info, not a failure
+                    if err and err.startswith("Account created"):
+                        st.info(err)
+                    else:
+                        st.error(err)
+        st.markdown("---")
+        if st.button("Already have an account? Log in", use_container_width=True):
+            st.session_state.auth_mode = "login"
+            st.rerun()
+
+
+# ==========================================================================
+# HOME (landing) + WATCHLIST pages
+# ==========================================================================
+
+def _classification_lookup(conn, tickers=None):
+    """Rows of (ticker, matrix_cell, fh_stage, classified_at, primary_method,
+    valuation_json) from SQLite — for all classified tickers or a subset."""
+    if conn is None:
+        return []
+    q = ("SELECT c.ticker, c.matrix_cell, c.fh_stage, c.classified_at, "
+         "v.primary_method, v.valuation_json "
+         "FROM classifications c LEFT JOIN valuations v ON c.ticker = v.ticker ")
+    try:
+        if tickers:
+            marks = ",".join("?" for _ in tickers)
+            return conn.execute(q + f"WHERE c.ticker IN ({marks}) ORDER BY c.ticker",
+                                tuple(tickers)).fetchall()
+        return conn.execute(q + "ORDER BY c.ticker").fetchall()
+    except Exception:
+        return []
+
+
+def _fmt_primary(verdict_tuple):
+    """'EV/EBITDA 30.45' style string from derive_verdict output."""
+    _, disp, val = verdict_tuple
+    if disp is None:
+        return "—"
+    if val is None:
+        return f"{disp} —"
+    return f"{disp} {val:,.2f}"
+
+
+_VERDICT_SPAN = {
+    "Undervalued": '<span style="color:#22c55e;font-weight:700;">Undervalued</span>',
+    "Fair":        '<span style="color:#7dd3fc;font-weight:700;">Fair</span>',
+    "Overvalued":  '<span style="color:#ef4444;font-weight:700;">Overvalued</span>',
+    None:          '<span style="color:#64748b;">—</span>',
+}
+
+
+def render_home_page(user):
+    """Landing page: watchlist status board, universe summary, recently moved."""
+    from supabase_client import get_stage_changes_for_tickers, get_recent_stage_changes
+
+    conn = get_db_connection()
+    display_name = user.get("display_name") or "there"
+    st.markdown(f"<div class='fun-header'>Welcome back, {display_name}</div>",
+                unsafe_allow_html=True)
+
+    # ── Section 1: Watchlist status board ────────────────────────────────
+    st.subheader("Your Watchlist")
+    wl_rows = st.session_state.get("_watchlist_cache", [])
+    if not wl_rows:
+        st.info("Add tickers to your watchlist from the analysis page.")
+    else:
+        wl_tickers = [r["ticker"] for r in wl_rows]
+        cls_rows = {r[0]: r for r in _classification_lookup(conn, wl_tickers)}
+        changed_recently = get_stage_changes_for_tickers(wl_tickers, days=7)
+
+        headers = ["Ticker", "Matrix Cell", "Primary Metric", "Verdict",
+                   "Stage", "Last Updated", "Stage Changed"]
+        rows = []
+        for t in wl_tickers:
+            c = cls_rows.get(t)
+            if c is None:
+                rows.append([t, "not classified", "—", _VERDICT_SPAN[None], "—", "—", "—"])
+                continue
+            _, cell, stage, classified_at, _pm, vjson = c
+            try:
+                vdata = json.loads(vjson) if vjson else {}
+            except Exception:
+                vdata = {}
+            vt = derive_verdict(cell, vdata)
+            changed = t in changed_recently
+            changed_cell = ('<span style="color:#f59e0b;font-weight:800;">YES</span>'
+                            if changed else '<span style="color:#64748b;">—</span>')
+            rows.append([
+                t, cell, _fmt_primary(vt), _VERDICT_SPAN.get(vt[0]),
+                f"Stage {stage}", (classified_at or "")[:10], changed_cell,
+            ])
+        render_dark_table(headers, rows)
+        if changed_recently:
+            st.caption("Amber **YES** = the financial health stage changed in the last pipeline run.")
+
+    st.markdown("---")
+
+    # ── Section 2: Universe summary ──────────────────────────────────────
+    st.subheader("Universe Summary")
+    all_rows = _classification_lookup(conn)
+    buckets = {"Undervalued": [], "Fair": [], "Overvalued": [], "Flagged": []}
+    for t, cell, stage, _ca, _pm, vjson in all_rows:
+        try:
+            vdata = json.loads(vjson) if vjson else {}
+        except Exception:
+            vdata = {}
+        v, _d, _val = derive_verdict(cell, vdata)
+        if v in buckets:
+            buckets[v].append((t, cell))
+        if conn is not None and get_active_flags(conn, t):
+            buckets["Flagged"].append((t, cell))
+
+    _cards = st.columns(4)
+    _card_meta = [
+        ("Undervalued", "#22c55e"), ("Fair", "#7dd3fc"),
+        ("Overvalued", "#ef4444"), ("Flagged", "#f59e0b"),
+    ]
+    for _i, (_name, _colour) in enumerate(_card_meta):
+        with _cards[_i]:
+            if st.button(f"{_name} · {len(buckets[_name])}",
+                         key=f"universe_card_{_name}", use_container_width=True):
+                st.session_state.universe_filter = (
+                    None if st.session_state.get("universe_filter") == _name else _name)
+    _filt = st.session_state.get("universe_filter")
+    if _filt:
+        st.caption(f"Showing **{_filt}** tickers — click the card again to clear.")
+        _sel_rows = [[t, cell] for t, cell in sorted(set(buckets[_filt]))]
+        if _sel_rows:
+            render_dark_table(["Ticker", "Matrix Cell"], _sel_rows)
+        else:
+            st.write(f"No tickers currently classified as {_filt}.")
+
+    st.markdown("---")
+
+    # ── Section 3: Recently moved ────────────────────────────────────────
+    st.subheader("Recently Moved")
+    st.caption("Stage transitions detected by the pipeline in the last 30 days.")
+    changes = get_recent_stage_changes(days=30, limit=10)
+    if not changes:
+        st.write("No stage changes recorded in the last 30 days.")
+    else:
+        rows = []
+        for ch in changes:
+            _arrow_colour = "#22c55e" if (ch.get("new_stage") or 0) > (ch.get("previous_stage") or 0) else "#ef4444"
+            rows.append([
+                ch.get("ticker", "—"),
+                f'Stage {ch.get("previous_stage", "?")} '
+                f'<span style="color:{_arrow_colour};font-weight:800;">→</span> '
+                f'Stage {ch.get("new_stage", "?")}',
+                (ch.get("changed_at") or "")[:10],
+                ch.get("matrix_cell") or "—",
+            ])
+        render_dark_table(["Ticker", "Transition", "Date", "Matrix Cell"], rows)
+
+
+def render_watchlist_page(user):
+    """Dedicated watchlist page — full KPI detail + per-row remove."""
+    from supabase_client import remove_from_watchlist
+
+    conn = get_db_connection()
+    st.markdown("<div class='fun-header'>Watchlist</div>", unsafe_allow_html=True)
+
+    wl_rows = st.session_state.get("_watchlist_cache", [])
+    if not wl_rows:
+        st.info("Your watchlist is empty. Add tickers from the analysis page.")
+        return
+
+    # Pipeline freshness note
+    try:
+        last_run = conn.execute("SELECT MAX(classified_at) FROM classifications").fetchone()[0]
+        st.caption(f"Classifications refresh when the pipeline runs — last run: "
+                   f"**{(last_run or 'unknown')[:16].replace('T', ' ')}**")
+    except Exception:
+        pass
+
+    wl_tickers = [r["ticker"] for r in wl_rows]
+    cls_rows = {r[0]: r for r in _classification_lookup(conn, wl_tickers)}
+    kpis = {}
+    try:
+        marks = ",".join("?" for _ in wl_tickers)
+        for r in conn.execute(
+            f"SELECT ticker, fcf_margin_adj, gross_margin, revenue_growth_yoy, "
+            f"operating_leverage FROM computed_metrics WHERE ticker IN ({marks})",
+            tuple(wl_tickers)).fetchall():
+            kpis[r[0]] = r[1:]
+    except Exception:
+        pass
+
+    def _n(v, nd=1):
+        return "—" if v is None else f"{v:,.{nd}f}"
+
+    headers = ["Ticker", "Matrix Cell", "Stage", "FCF Margin adj (%)",
+               "Gross Margin (%)", "Rev Growth YoY (%)", "Op Leverage (pp)",
+               "Primary Metric", "Verdict", "Alert"]
+    rows = []
+    for r in wl_rows:
+        t = r["ticker"]
+        c = cls_rows.get(t)
+        k = kpis.get(t, (None, None, None, None))
+        alert = "🔔" if r.get("alert_on_stage_change") else "—"
+        if c is None:
+            rows.append([t, "not classified", "—", "—", "—", "—", "—", "—",
+                         _VERDICT_SPAN[None], alert])
+            continue
+        _, cell, stage, _ca, _pm, vjson = c
+        try:
+            vdata = json.loads(vjson) if vjson else {}
+        except Exception:
+            vdata = {}
+        vt = derive_verdict(cell, vdata)
+        rows.append([
+            t, cell, f"Stage {stage}",
+            _n(k[0]), _n(k[1]), _n(k[2]), _n(k[3]),
+            _fmt_primary(vt), _VERDICT_SPAN.get(vt[0]), alert,
+        ])
+    render_dark_table(headers, rows)
+
+    # Per-row remove buttons (grid, 4 per row)
+    st.markdown("**Remove from watchlist:**")
+    _uid = user.get("id")
+    for _start in range(0, len(wl_tickers), 4):
+        _chunk = wl_tickers[_start:_start + 4]
+        _cols = st.columns(4)
+        for _j, _t in enumerate(_chunk):
+            with _cols[_j]:
+                if st.button(f"Remove {_t}", key=f"wl_rm_{_t}", use_container_width=True):
+                    remove_from_watchlist(_uid, _t)
+                    st.rerun()
+
+
 # --- MAIN DASHBOARD LOGIC (Original Code Wrapped) ---
 def main_dashboard():
     # --- CUSTOM CSS: Ocean Blue Theme & Fun Graphics ---
@@ -1228,30 +1705,40 @@ def main_dashboard():
 
     # --- Horizontal Navigation ---
     PAGES = [
-        "Introduction",
-        "Financial Analysis",
-        "Stage-Based Analysis",
-        "Company Profile",
+        "Home",
+        "Analysis",
+        "Watchlist",
+        "About",
         "Other",
     ]
-    # Subpages rendered inside "Other"
-    OTHER_SUBPAGES = ["DCF Model", "Macro Stress Test"]
+    # Legacy pages live under "Other"
+    OTHER_SUBPAGES = ["Financial Analysis", "Company Profile", "DCF Model", "Macro Stress Test"]
 
     if 'active_page' not in st.session_state:
-        st.session_state.active_page = "Introduction"
+        st.session_state.active_page = "Home"
+    if st.session_state.active_page not in PAGES:
+        st.session_state.active_page = "Home"
     if 'other_subpage' not in st.session_state:
-        st.session_state.other_subpage = "DCF Model"
+        st.session_state.other_subpage = "Financial Analysis"
 
-    # Header banner — compact, no tagline
+    _user = st.session_state.get("user", {})
+    from supabase_client import get_watchlist as _sb_get_watchlist, sign_out as _sb_sign_out
+    _wl_rows = _sb_get_watchlist(_user.get("id"))
+    _wl_count = len(_wl_rows)
+    st.session_state["_watchlist_cache"] = _wl_rows
+
+    # Header banner — brand left, user identity right
     st.markdown(
         '<div class="valoura-topbar">'
         '<div class="valoura-brand">Contextual Valuation Engine</div>'
+        f'<div style="color:#7dd3fc;font-size:0.82em;margin-top:2px;">'
+        f'Signed in as <b>{_user.get("display_name", "—")}</b></div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # Nav buttons — Stage-Based Analysis gets a white border outline when inactive
-    _nav_cols = st.columns(len(PAGES))
+    # Nav row: 5 page buttons + bookmark badge + logout on the right
+    _nav_cols = st.columns([1, 1, 1, 1, 1, 0.7, 0.7])
     for _i, _p in enumerate(PAGES):
         with _nav_cols[_i]:
             _is_active = _p == st.session_state.active_page
@@ -1264,15 +1751,28 @@ def main_dashboard():
             ):
                 st.session_state.active_page = _p
                 st.rerun()
+    with _nav_cols[5]:
+        # Bookmark button with watchlist count badge → Watchlist page
+        if st.button(f"🔖 {_wl_count}", key="nav_bookmark_badge",
+                     use_container_width=True,
+                     help="Your watchlist"):
+            st.session_state.active_page = "Watchlist"
+            st.rerun()
+    with _nav_cols[6]:
+        if st.button("Logout", key="nav_logout", use_container_width=True):
+            _sb_sign_out()
+            for _k in ("user", "auth_mode", "_watchlist_cache", "stock_data"):
+                st.session_state.pop(_k, None)
+            st.rerun()
 
-    # JS: tag the Stage-Based Analysis button so CSS can give it a white outline
+    # JS: tag the Analysis button so CSS can give it an outline when inactive
     st.markdown(
         """
         <script>
         (function() {
             setTimeout(function() {
                 document.querySelectorAll('button[data-testid="baseButton-secondary"]').forEach(function(btn) {
-                    if ((btn.textContent || '').trim() === 'Stage-Based Analysis') {
+                    if ((btn.textContent || '').trim() === 'Analysis') {
                         btn.setAttribute('data-sba', 'true');
                     } else {
                         btn.removeAttribute('data-sba');
@@ -1289,7 +1789,7 @@ def main_dashboard():
 
     # Subpage selector inside "Other"
     if active == "Other":
-        _sub_cols = st.columns([1, 1, 4])
+        _sub_cols = st.columns([1, 1, 1, 1, 2])
         for _j, _sp in enumerate(OTHER_SUBPAGES):
             with _sub_cols[_j]:
                 if st.button(
@@ -1301,20 +1801,78 @@ def main_dashboard():
                     st.session_state.other_subpage = _sp
                     st.rerun()
 
-    # --- Control Row: Ticker input + Run Analysis button ---
+    # --- Control Row: classified-ticker selectbox + unclassified free-text ---
+    _CAT_NAV_DISPLAY = {
+        "hyperscale":        "Hyperscale",
+        "saas":              "Pure SaaS",
+        "semi_hardware":     "Semi / Hardware",
+        "consumer_internet": "Consumer Internet",
+        "deep_tech":         "Deep Tech",
+    }
+    _tick_conn = get_db_connection()
+    _ticker_options = []          # list of display strings
+    _ticker_map = {}              # display string -> raw ticker
+    if _tick_conn is not None:
+        try:
+            for _t, _bm, _fh in _tick_conn.execute(
+                "SELECT ticker, bm_category, fh_stage FROM classifications ORDER BY ticker"
+            ).fetchall():
+                _disp = f"{_t} — {_CAT_NAV_DISPLAY.get(_bm, _bm)} · S{_fh}"
+                _ticker_options.append(_disp)
+                _ticker_map[_disp] = _t
+        except Exception:
+            pass
+
     ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 4])
     with ctrl1:
-        ticker_symbol = st.text_input(
-            "Stock Ticker",
-            value=st.session_state.get("last_ticker", "AAPL"),
-            help="Try: AAPL, MSFT, NVDA, GOOGL, QBTS, ASTS",
+        _prev_ticker = st.session_state.get("last_ticker", "AAPL")
+        _default_idx = 0
+        for _ix, _d in enumerate(_ticker_options):
+            if _ticker_map[_d] == _prev_ticker:
+                _default_idx = _ix
+                break
+        _sel = st.selectbox(
+            "Classified ticker",
+            options=_ticker_options,
+            index=_default_idx if _ticker_options else None,
             label_visibility="collapsed",
-            placeholder="Enter ticker (e.g. AAPL)",
-        ).upper()
+            key="ticker_selectbox",
+        )
     with ctrl2:
-        analyze_now = st.button("🚀 Run Analysis", use_container_width=True)
+        analyze_now = st.button("Fetch live data", use_container_width=True,
+                                help="Loads live market data (needed for the pages under Other)")
     with ctrl3:
-        st.caption("💡 Try AAPL · MSFT · NVDA · QBTS · ASTS · POET")
+        st.caption(f"{len(_ticker_options)} classified tickers available")
+
+    # Free-text path for unclassified tickers
+    with st.expander("Analyse unclassified ticker"):
+        _free_col1, _free_col2 = st.columns([3, 1])
+        with _free_col1:
+            _free_text = st.text_input(
+                "Unclassified ticker", label_visibility="collapsed",
+                placeholder="e.g. TSLA — not yet classified by the engine",
+                key="unclassified_input",
+            ).strip().upper()
+        with _free_col2:
+            _use_free = st.button("Analyse", use_container_width=True, key="unclassified_go")
+        if _use_free and _free_text:
+            st.session_state.unclassified_ticker = _free_text
+            analyze_now = True
+        if st.session_state.get("unclassified_ticker"):
+            if st.button(f"← Back to classified tickers (currently viewing "
+                         f"{st.session_state.unclassified_ticker})", key="clear_unclassified"):
+                st.session_state.pop("unclassified_ticker", None)
+                st.rerun()
+
+    # Resolve active ticker: unclassified free-text wins if set
+    if st.session_state.get("unclassified_ticker"):
+        ticker_symbol = st.session_state.unclassified_ticker
+        st.info(f"**{ticker_symbol}** — this ticker has not been classified by the "
+                "engine yet — showing live data only.")
+    elif _sel and _ticker_map:
+        ticker_symbol = _ticker_map.get(_sel, "AAPL")
+    else:
+        ticker_symbol = _prev_ticker
 
     page = active
 
@@ -1342,8 +1900,8 @@ def main_dashboard():
 
     # Dispatch "Other" to its selected subpage before routing
 
-    # --- INTRODUCTION PAGE (no ticker needed — render before data gate) ---
-    if page == "Introduction":
+    # --- ABOUT PAGE (formerly Introduction — no ticker needed) ---
+    if page == "About":
         _cve_conn = get_db_connection()
 
         # Header
@@ -1478,37 +2036,45 @@ Private investors who want to understand a stock rather than simply be told what
         else:
             st.info("Database not connected. Run `backfill_fh_history.py` and ensure `valoura_backtest.db` is in the app directory.")
 
+    # --- HOME PAGE (landing — Supabase watchlist + SQLite classifications) ---
+    if page == "Home":
+        render_home_page(st.session_state.get("user", {}))
+
+    # --- WATCHLIST PAGE ---
+    if page == "Watchlist":
+        render_watchlist_page(st.session_state.get("user", {}))
+
+    # --- OTHER → dispatch to legacy subpage; these need LIVE market data ---
     if page == "Other":
-        page = st.session_state.get("other_subpage", "DCF Model")
+        page = st.session_state.get("other_subpage", "Financial Analysis")
 
-    else:
-        # All non-Introduction pages require stock data — gate here
-        if analyze_now or 'stock_data' in st.session_state:
-            if analyze_now:
-                clean_ticker = str(ticker_symbol).strip().upper()
-                if not clean_ticker:
-                    st.error("Ticker symbol is empty. Please enter a valid symbol.")
-                    return
-                st.cache_resource.clear()
+        # Live-data gate: auto-fetch when ticker changed or nothing cached.
+        _cached_tkr = st.session_state.get("stock_data_ticker")
+        _need_fetch = (
+            analyze_now
+            or "stock_data" not in st.session_state
+            or _cached_tkr != ticker_symbol
+        )
+        if _need_fetch:
+            clean_ticker = str(ticker_symbol).strip().upper()
+            if not clean_ticker:
+                st.error("Ticker symbol is empty. Please enter a valid symbol.")
+                return
+            with st.spinner(f"Fetching live market data for {clean_ticker}..."):
                 stock, info = fetch_stock_data_v2(clean_ticker)
-                if stock is None or info is None:
-                    st.error(
-                        f"CVE cannot reach any data source for **{clean_ticker}**.\n\n"
-                        f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
-                        f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
-                        f"Go to App Settings → Secrets and add:\n\n"
-                        f"```toml\nALPHA_VANTAGE_KEY = \"your_key_here\"\n```"
-                    )
-                    return
-                st.session_state.stock_data = (stock, info)
-            else:
-                stock, info = st.session_state.stock_data
+            if stock is None or info is None:
+                st.error(
+                    f"CVE cannot reach any data source for **{clean_ticker}**.\n\n"
+                    f"All three fetchers failed: yfinance, yahooquery, and Alpha Vantage. "
+                    f"This usually means the **ALPHA_VANTAGE_KEY** secret is not configured on Streamlit Cloud. "
+                    f"Go to App Settings → Secrets and add:\n\n"
+                    f"```toml\nALPHA_VANTAGE_KEY = \"your_key_here\"\n```"
+                )
+                st.stop()
+            st.session_state.stock_data = (stock, info)
+            st.session_state.stock_data_ticker = clean_ticker
         else:
-            st.info("Enter a ticker and click 'Run Analysis' to begin.")
-            st.stop()
-
-        if False:
-            pass
+            stock, info = st.session_state.stock_data
 
     # --- PAGE 1: Financial Analysis ---
     if page == "Financial Analysis":
@@ -2080,93 +2646,9 @@ Private investors who want to understand a stock rather than simply be told what
             else:
                 st.info("No recent news found from major sources.")
 
-    # --- PAGE 6: Stage-Based Analysis ---
-    elif page == "Stage-Based Analysis":
-        # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
-        # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
-        # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
-        HEADER_METRICS = {
-            "FCF Margin Adjusted": (
-                "fcf_margin_adj", "%",
-                "- **What it is:** Free cash flow margin, adjusted to add back stock-based compensation (SBC).\n"
-                "- **How it's used:** The cleanest read of true cash profitability — how much cash the business generates per dollar of revenue, ignoring accounting noise.\n"
-                "- **High/low:** Above 20% indicates a cash-generative business with pricing power; 5–15% is typical for mature scaling; below 0% means the company is burning cash."
-            ),
-            "Gross Margin": (
-                "gross_margin", "%",
-                "- **What it is:** Gross profit divided by revenue (revenue minus cost of goods sold).\n"
-                "- **How it's used:** Measures unit economics — how much revenue is left after the direct cost of producing or delivering the product.\n"
-                "- **High/low:** Above 70% is typical for software/SaaS; 40–60% for hardware or hyperscale infrastructure; below 30% suggests a commoditised product or scale-economics business."
-            ),
-            "Revenue Growth YoY": (
-                "revenue_growth_yoy", "%",
-                "- **What it is:** Percentage change in trailing-12-month revenue versus the prior 12 months.\n"
-                "- **How it's used:** Top-line momentum check; paired with margins to assess whether growth is profitable or just spending-driven.\n"
-                "- **High/low:** Above 30% indicates strong demand and market expansion; 10–20% is mature growth; below 5% suggests market saturation or competitive pressure."
-            ),
-            "Operating Leverage": (
-                "operating_leverage", "pp",
-                "- **What it is:** Operating income growth rate minus revenue growth rate (in percentage points).\n"
-                "- **How it's used:** Shows whether costs are scaling slower than revenue — positive numbers mean margins are expanding as the business grows.\n"
-                "- **High/low:** Above +5pp means strong margin expansion; near 0pp means linear scaling; negative means costs are growing faster than revenue (margin compression)."
-            ),
-        }
-
-        _conn_top = get_db_connection()
-        _ticker_in_db = False
-        if _conn_top is not None:
-            _ticker_in_db = _conn_top.execute(
-                "SELECT 1 FROM computed_metrics WHERE ticker=?", (ticker_symbol,)
-            ).fetchone() is not None
-
-        if not _ticker_in_db:
-            st.info(
-                f"ℹ️ **{ticker_symbol}** is not yet in the CVE database. "
-                "Run the data pipeline to ingest fundamentals + classify this ticker."
-            )
-        else:
-            # Compute industry median for each header metric across all classified tickers
-            import statistics as _stats
-            _cols = [v[0] for v in HEADER_METRICS.values()]
-            _medians = {}
-            for _col in _cols:
-                _vals = [
-                    r[0] for r in _conn_top.execute(
-                        f"SELECT {_col} FROM computed_metrics WHERE {_col} IS NOT NULL"
-                    ).fetchall()
-                ]
-                _medians[_col] = _stats.median(_vals) if _vals else None
-
-            _current_row = _conn_top.execute(
-                f"SELECT {', '.join(_cols)} FROM computed_metrics WHERE ticker=?",
-                (ticker_symbol,)
-            ).fetchone()
-            _cur_vals = dict(zip(_cols, _current_row)) if _current_row else {}
-
-            _hc1, _hc2, _hc3, _hc4 = st.columns(4)
-            _cols_ui = [_hc1, _hc2, _hc3, _hc4]
-            for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
-                _cur = _cur_vals.get(_col)
-                _med = _medians.get(_col)
-                # Unit lives in the label, not in the value/delta
-                _label_with_unit = f"{_label} ({_unit})"
-                with _cols_ui[_idx]:
-                    if _cur is None:
-                        st.metric(_label_with_unit, "—", help=_tip)
-                    else:
-                        _value_str = f"{_cur:.1f}"
-                        if _med is not None:
-                            _delta = _cur - _med
-                            _delta_str = f"{_delta:+.1f} vs median ({_med:.1f})"
-                            # delta_color="normal" → green if positive, red if negative.
-                            # All 4 metrics are "higher is better" so default is correct.
-                            st.metric(_label_with_unit, _value_str, delta=_delta_str, help=_tip)
-                        else:
-                            st.metric(_label_with_unit, _value_str, help=_tip)
-
-            st.markdown("---")
-
-        st.markdown(f"<div class='fun-header'>Stage-Based Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
+    # --- PAGE 6: Analysis (formerly Stage-Based Analysis) ---
+    elif page == "Analysis":
+        st.markdown(f"<div class='fun-header'>Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
 
         # ── Constants ────────────────────────────────────────────────────────
         BM_CATEGORIES = ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]
@@ -2290,89 +2772,7 @@ Private investors who want to understand a stock rather than simply be told what
         # Addition 3: all metrics with fair ranges per cell
         # Each tuple: (display_name, val_data_key, low, high, unit, kind)
         # kind: "multiple" (higher=expensive), "yield" (higher=cheaper), "score" (higher=better)
-        FAIR_RANGES_FULL = {
-            "hyperscale-4": [
-                ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
-                ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
-            ],
-            "hyperscale-3": [
-                ("CapEx EV/EBIT","capex_adj_ev_ebit",  20,  35,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         25,  45,  "%", "score"),
-            ],
-            "hyperscale-2": [
-                ("CapEx EV/EBIT","capex_adj_ev_ebit",  40,  80,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
-            ],
-            "hyperscale-1": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         6,   15,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
-            ],
-            "saas-4": [
-                ("FCF Yield",    "fcf_yield",          1.0, 2.5, "%", "yield"),
-                ("EV/FCF",       "ev_fcf",             20,  35,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         40,  60,  "%", "score"),
-            ],
-            "saas-3": [
-                ("EV/FCF",       "ev_fcf",             25,  45,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          0.8, 2.0, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
-            ],
-            "saas-2": [
-                ("EV/NTM ARR",   "ev_ntm_arr",         8,   18,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
-            ],
-            "saas-1": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         8,   20,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
-            ],
-            "semi_hardware-4": [
-                ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
-                ("PEG",          "peg_ratio",          0.5, 1.2, "x", "multiple"),
-            ],
-            "semi_hardware-3": [
-                ("Cycle P/E",    "cycle_adj_pe",       20,  35,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         25,  50,  "%", "score"),
-            ],
-            "semi_hardware-2": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         1.5, 4.0, "x", "multiple"),
-            ],
-            "semi_hardware-1": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         0.5, 2.0, "x", "multiple"),
-            ],
-            "consumer_internet-4": [
-                ("EV/EBITDA",    "ev_ebitda",          12,  18,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          0.8, 1.5, "x", "multiple"),
-            ],
-            "consumer_internet-3": [
-                ("EV/EBITDA",    "ev_ebitda",          18,  30,  "x", "multiple"),
-                ("PEG",          "peg_ratio",          1.0, 2.5, "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         20,  40,  "%", "score"),
-            ],
-            "consumer_internet-2": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         4,   10,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
-            ],
-            "consumer_internet-1": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         1,   5,   "x", "multiple"),
-            ],
-            "deep_tech-4": [
-                ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
-            ],
-            "deep_tech-3": [
-                ("EV/GP",        "ev_gross_profit",    15,  30,  "x", "multiple"),
-                ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
-            ],
-            "deep_tech-2": [
-                ("EV/NTM Rev",   "ev_ntm_arr",         5,   12,  "x", "multiple"),
-            ],
-            "deep_tech-1": [
-                ("P/S",          "ps_ratio",           20,  60,  "x", "multiple"),
-            ],
-        }
+        # FAIR_RANGES_FULL is defined at module level (shared with Home/Watchlist pages)
         # Addition 4: FH stage weights (mirrors data_pipeline1.py FH_STAGE_WEIGHTS)
         FH_STAGE_WEIGHTS_UI = {
             1: {"FCF Margin (adj)": 0.30, "Cash Runway": 0.40, "Gross Margin": 0.15, "Op. Leverage": 0.00, "SBC % Rev": 0.10, "D/E Ratio": 0.05, "ROIC": 0.00},
@@ -2408,235 +2808,856 @@ Private investors who want to understand a stock rather than simply be told what
 
                 stage_label = STAGE_LABELS.get(fh_stage, f"Stage {fh_stage}")
 
-                # ── Section 3: Matrix 5×4 position visualiser ─────────────────
-                # Short labels (fit narrow screens — no horizontal scroll)
-                CAT_SHORT = {
-                    "hyperscale":        "Hyperscale",
-                    "saas":              "SaaS",
-                    "semi_hardware":     "Semi/HW",
-                    "consumer_internet": "Consumer",
-                    "deep_tech":         "Deep Tech",
-                }
+                # ── Watchlist bookmark toggle ────────────────────────────────
+                from supabase_client import is_in_watchlist, add_to_watchlist, remove_from_watchlist, set_alert
+                _wl_user = st.session_state.get("user", {})
+                _wl_uid = _wl_user.get("id")
+                _wl_entry = is_in_watchlist(_wl_uid, ticker_symbol) if _wl_uid else None
+                _bm_col1, _bm_col2, _bm_col3 = st.columns([1.6, 2.4, 3])
+                with _bm_col1:
+                    if _wl_entry:
+                        if st.button("🔖 In watchlist — remove", key=f"wl_toggle_{ticker_symbol}",
+                                     type="primary", use_container_width=True):
+                            remove_from_watchlist(_wl_uid, ticker_symbol)
+                            st.rerun()
+                    else:
+                        if st.button("Add to watchlist 🔖", key=f"wl_toggle_{ticker_symbol}",
+                                     use_container_width=True):
+                            _alert_pref = st.session_state.get(f"wl_alert_pref_{ticker_symbol}", False)
+                            _ok, _err = add_to_watchlist(_wl_uid, ticker_symbol, matrix_cell, fh_stage, _alert_pref)
+                            if not _ok:
+                                st.error(_err or "Could not add to watchlist.")
+                            st.rerun()
+                with _bm_col2:
+                    if _wl_entry:
+                        _alert_now = bool(_wl_entry.get("alert_on_stage_change"))
+                        _alert_new = st.toggle("Alert me if this ticker changes stage",
+                                               value=_alert_now, key=f"wl_alert_{ticker_symbol}")
+                        if _alert_new != _alert_now:
+                            set_alert(_wl_uid, ticker_symbol, _alert_new)
+                            st.rerun()
+                    else:
+                        st.toggle("Alert me if this ticker changes stage",
+                                  key=f"wl_alert_pref_{ticker_symbol}",
+                                  help="Applied when you add the ticker to your watchlist")
 
-                grid_rows = []
-                header_ths = (
-                    '<th style="background:#1e293b;color:#cbd5e1;padding:8px 6px;'
-                    'font-size:0.78em;border:1px solid #64748b;"></th>'
-                )
-                for cat in BM_CATEGORIES:
-                    header_ths += (
-                        f'<th style="background:#1e293b;color:#e2e8f0;padding:8px 4px;'
-                        f'font-size:0.82em;font-weight:700;border:1px solid #64748b;'
-                        f'text-align:center;">{CAT_SHORT[cat]}</th>'
-                    )
-                grid_rows.append(f'<tr>{header_ths}</tr>')
+                # Preload valuation row (interpretation + valuation cards both need it)
+                val_row = conn_vb.execute(
+                    "SELECT primary_method, valuation_json FROM valuations WHERE ticker=?",
+                    (ticker_symbol,)
+                ).fetchone()
+                if val_row:
+                    primary_method, val_json_str = val_row
+                    val_data = json.loads(val_json_str) if val_json_str else {}
+                else:
+                    primary_method, val_json_str, val_data = None, None, {}
 
-                for s in [1, 2, 3, 4]:
-                    stage_th = (
-                        f'<td style="background:#1e293b;color:#e2e8f0;font-size:0.82em;'
-                        f'font-weight:700;padding:8px 6px;border:1px solid #64748b;'
-                        f'white-space:nowrap;">Stage {s}</td>'
+                # ── Two-column layout: left 40% (classification) / right 60% (valuation) ──
+                _col_L, _col_R = st.columns([2, 3], gap="large")
+
+                with _col_L:
+                    # Classification badges (2×2)
+                    _b1, _b2 = st.columns(2)
+                    _b1.metric("Business Model", bm_category.replace("_", " ").title())
+                    _b2.metric("Matrix Cell", matrix_cell)
+                    _b3, _b4 = st.columns(2)
+                    _b3.metric("FH Stage", f"Stage {fh_stage}")
+                    _b4.metric("Confidence", bm_confidence or "—")
+
+                with _col_L:
+                    # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
+                    # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
+                    # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
+                    HEADER_METRICS = {
+                        "FCF Margin Adjusted": (
+                            "fcf_margin_adj", "%",
+                            "- **What it is:** Free cash flow margin, adjusted to add back stock-based compensation (SBC).\n"
+                            "- **How it's used:** The cleanest read of true cash profitability — how much cash the business generates per dollar of revenue, ignoring accounting noise.\n"
+                            "- **High/low:** Above 20% indicates a cash-generative business with pricing power; 5–15% is typical for mature scaling; below 0% means the company is burning cash."
+                        ),
+                        "Gross Margin": (
+                            "gross_margin", "%",
+                            "- **What it is:** Gross profit divided by revenue (revenue minus cost of goods sold).\n"
+                            "- **How it's used:** Measures unit economics — how much revenue is left after the direct cost of producing or delivering the product.\n"
+                            "- **High/low:** Above 70% is typical for software/SaaS; 40–60% for hardware or hyperscale infrastructure; below 30% suggests a commoditised product or scale-economics business."
+                        ),
+                        "Revenue Growth YoY": (
+                            "revenue_growth_yoy", "%",
+                            "- **What it is:** Percentage change in trailing-12-month revenue versus the prior 12 months.\n"
+                            "- **How it's used:** Top-line momentum check; paired with margins to assess whether growth is profitable or just spending-driven.\n"
+                            "- **High/low:** Above 30% indicates strong demand and market expansion; 10–20% is mature growth; below 5% suggests market saturation or competitive pressure."
+                        ),
+                        "Operating Leverage": (
+                            "operating_leverage", "pp",
+                            "- **What it is:** Operating income growth rate minus revenue growth rate (in percentage points).\n"
+                            "- **How it's used:** Shows whether costs are scaling slower than revenue — positive numbers mean margins are expanding as the business grows.\n"
+                            "- **High/low:** Above +5pp means strong margin expansion; near 0pp means linear scaling; negative means costs are growing faster than revenue (margin compression)."
+                        ),
+                    }
+
+                    _conn_top = get_db_connection()
+                    _ticker_in_db = False
+                    if _conn_top is not None:
+                        _ticker_in_db = _conn_top.execute(
+                            "SELECT 1 FROM computed_metrics WHERE ticker=?", (ticker_symbol,)
+                        ).fetchone() is not None
+
+                    if not _ticker_in_db:
+                        st.info(
+                            f"ℹ️ **{ticker_symbol}** is not yet in the CVE database. "
+                            "Run the data pipeline to ingest fundamentals + classify this ticker."
+                        )
+                    else:
+                        # Compute industry median for each header metric across all classified tickers
+                        import statistics as _stats
+                        _cols = [v[0] for v in HEADER_METRICS.values()]
+                        _medians = {}
+                        for _col in _cols:
+                            _vals = [
+                                r[0] for r in _conn_top.execute(
+                                    f"SELECT {_col} FROM computed_metrics WHERE {_col} IS NOT NULL"
+                                ).fetchall()
+                            ]
+                            _medians[_col] = _stats.median(_vals) if _vals else None
+
+                        _current_row = _conn_top.execute(
+                            f"SELECT {', '.join(_cols)} FROM computed_metrics WHERE ticker=?",
+                            (ticker_symbol,)
+                        ).fetchone()
+                        _cur_vals = dict(zip(_cols, _current_row)) if _current_row else {}
+
+                        _hc1, _hc2, _hc3, _hc4 = st.columns(4)
+                        _cols_ui = [_hc1, _hc2, _hc3, _hc4]
+                        for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
+                            _cur = _cur_vals.get(_col)
+                            _med = _medians.get(_col)
+                            # Unit lives in the label, not in the value/delta
+                            _label_with_unit = f"{_label} ({_unit})"
+                            with _cols_ui[_idx]:
+                                if _cur is None:
+                                    st.metric(_label_with_unit, "—", help=_tip)
+                                else:
+                                    _value_str = f"{_cur:.1f}"
+                                    if _med is not None:
+                                        _delta = _cur - _med
+                                        _delta_str = f"{_delta:+.1f} vs median ({_med:.1f})"
+                                        # delta_color="normal" → green if positive, red if negative.
+                                        # All 4 metrics are "higher is better" so default is correct.
+                                        st.metric(_label_with_unit, _value_str, delta=_delta_str, help=_tip)
+                                    else:
+                                        st.metric(_label_with_unit, _value_str, help=_tip)
+
+                        st.markdown("---")
+
+                with _col_L:
+                    # ── Section 3: Matrix 5×4 position visualiser ─────────────────
+                    # Short labels (fit narrow screens — no horizontal scroll)
+                    CAT_SHORT = {
+                        "hyperscale":        "Hyperscale",
+                        "saas":              "SaaS",
+                        "semi_hardware":     "Semi/HW",
+                        "consumer_internet": "Consumer",
+                        "deep_tech":         "Deep Tech",
+                    }
+
+                    grid_rows = []
+                    header_ths = (
+                        '<th style="background:#1e293b;color:#cbd5e1;padding:8px 6px;'
+                        'font-size:0.78em;border:1px solid #64748b;"></th>'
                     )
-                    tds = stage_th
                     for cat in BM_CATEGORIES:
-                        is_current = (cat == bm_category and s == fh_stage)
-                        same_stage = (s == fh_stage and not is_current)
-                        same_cat   = (cat == bm_category and not is_current)
-                        # Brighter labels — visible against the dark theme
-                        label_line = (
-                            f"{CAT_SHORT[cat]}<br>"
-                            f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span>"
+                        header_ths += (
+                            f'<th style="background:#1e293b;color:#e2e8f0;padding:8px 4px;'
+                            f'font-size:0.82em;font-weight:700;border:1px solid #64748b;'
+                            f'text-align:center;">{CAT_SHORT[cat]}</th>'
                         )
-                        if is_current:
-                            td_style  = ("background:#1b3a5c;border:2.5px solid #fbbf24;"
-                                         "color:#fde68a;font-weight:700;")
-                            content   = (
+                    grid_rows.append(f'<tr>{header_ths}</tr>')
+
+                    for s in [1, 2, 3, 4]:
+                        stage_th = (
+                            f'<td style="background:#1e293b;color:#e2e8f0;font-size:0.82em;'
+                            f'font-weight:700;padding:8px 6px;border:1px solid #64748b;'
+                            f'white-space:nowrap;">Stage {s}</td>'
+                        )
+                        tds = stage_th
+                        for cat in BM_CATEGORIES:
+                            is_current = (cat == bm_category and s == fh_stage)
+                            same_stage = (s == fh_stage and not is_current)
+                            same_cat   = (cat == bm_category and not is_current)
+                            # Brighter labels — visible against the dark theme
+                            label_line = (
                                 f"{CAT_SHORT[cat]}<br>"
-                                f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span><br>"
-                                f"<span style='font-size:0.92em;color:#7dd3fc;font-weight:700;'>▶ {ticker_symbol}</span>"
+                                f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span>"
                             )
-                        elif same_stage:
-                            # Brighter blue text on dim blue background, grey outline
-                            td_style  = "background:#1e293b;border:1px solid #64748b;color:#bfdbfe;"
-                            content   = label_line
-                        elif same_cat:
-                            # Brighter green text on dim green background, grey outline
-                            td_style  = "background:#1a2e22;border:1px solid #64748b;color:#bbf7d0;"
-                            content   = label_line
-                        else:
-                            # Lighter grey text on very dim background, grey outline
-                            td_style  = "background:#0f172a;border:1px solid #475569;color:#94a3b8;"
-                            content   = label_line
-                        tds += (
-                            f'<td style="{td_style}padding:10px 4px;text-align:center;'
-                            f'font-size:0.82em;width:20%;">{content}</td>'
-                        )
-                    grid_rows.append(f'<tr>{tds}</tr>')
-
-                st.markdown(
-                    '<div style="overflow-x:auto;margin:12px 0 4px 0;">'
-                    '<table style="border-collapse:collapse;width:100%;table-layout:fixed;">'
-                    + "".join(grid_rows)
-                    + '</table></div>',
-                    unsafe_allow_html=True,
-                )
-                st.caption("🟡 Current cell  ·  blue = same stage  ·  green = same category  ·  grey = other")
-
-                st.markdown("---")
-
-                # ── Section 4: Financial Health diagnosis (MAIN visible section) ─
-                st.subheader(f"Financial Health: Stage {fh_stage} — {stage_label.split('— ', 1)[-1]}")
-                st.caption(
-                    f"Weighted score **{fh_weighted_score:.2f}** · "
-                    f"Classification confidence **{bm_confidence or '—'}**"
-                )
-
-                # Always-visible sub-score table
-                _fh_sub_scores = {
-                    "FCF Margin (adj)": fh_fcf_stage,
-                    "Gross Margin":     fh_gm_stage,
-                    "Cash Runway":      fh_runway_stage,
-                    "Op. Leverage":     fh_oplev_stage,
-                    "SBC % Rev":        fh_sbc_stage,
-                    "D/E Ratio":        fh_de_stage,
-                    "ROIC":             fh_roic_stage,
-                }
-                _weights_ui = FH_STAGE_WEIGHTS_UI.get(fh_stage, FH_STAGE_WEIGHTS_UI[3])
-                _fh_table_rows = []
-                for _m_name, _sub_score in _fh_sub_scores.items():
-                    _w = _weights_ui.get(_m_name, 0)
-                    _contrib = round(_w * _sub_score, 3) if _w > 0 else None
-                    _fh_table_rows.append({
-                        "Metric":       _m_name,
-                        "Sub-score":    _sub_score,
-                        "Weight":       f"{_w*100:.0f}" if _w > 0 else "—",
-                        "Contribution": f"{_contrib:.3f}" if _contrib is not None else "—",
-                    })
-                _fh_table_rows.append({
-                    "Metric":       "Weighted total",
-                    "Sub-score":    "—",
-                    "Weight":       "—",
-                    "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
-                })
-                render_dark_table(
-                    ["Metric", "Sub-score (1–4)", "Weight (%)", "Contribution"],
-                    [[r["Metric"], r["Sub-score"], r["Weight"], r["Contribution"]] for r in _fh_table_rows],
-                )
-
-                # Always-visible FCF hard-cap status banner
-                if fh_fcf_hard_cap:
-                    st.warning("⚠️ FCF hard-cap applied: negative FCF margin capped the stage at Stage 2 regardless of other sub-scores.")
-                else:
-                    st.success("✅ FCF hard-cap not applied.")
-
-                # Small expander — methodology + weighting breakdown only
-                with st.expander("🔎 How was this calculated?"):
-                    st.markdown(
-                        "The stage is a **weighted average of seven sub-scores** (each 1–4), "
-                        "where the weights themselves vary by stage to reflect what matters most "
-                        "at each phase. Stage 1 emphasises survival metrics (runway, FCF); Stage 4 "
-                        "emphasises efficiency and capital allocation (ROIC, D/E)."
-                    )
-                    _weight_str = " · ".join(
-                        f"**{_m}**: {_w:.0%}"
-                        for _m, _w in _weights_ui.items()
-                        if _w > 0
-                    )
-                    st.markdown(f"**Stage {fh_stage} weights →** {_weight_str}")
-
-                st.markdown("---")
-
-                # ── Section 4b: Financial Health Trajectory ───────────────────
-                st.subheader("Financial Health Trajectory")
-                _traj_rows = conn_vb.execute(
-                    "SELECT as_of_date, fh_stage, fh_weighted_score "
-                    "FROM fh_stage_history "
-                    "WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 8",
-                    (ticker_symbol,),
-                ).fetchall()
-
-                if not _traj_rows:
-                    st.info(
-                        f"No historical FH stages recorded for **{ticker_symbol}** yet. "
-                        "Run `python3 backfill_fh_history.py` (zero AV credits) to populate the last 8 quarters."
-                    )
-                else:
-                    # Reverse to chronological order (oldest → newest)
-                    _traj = list(reversed(_traj_rows))
-
-                    # Helper: format YYYY-MM-DD to Q-label (e.g. "2024-12-31" → "Q4 2024")
-                    def _q_label(date_str):
-                        try:
-                            y, m, _ = date_str.split("-")
-                            q = (int(m) - 1) // 3 + 1
-                            return f"Q{q} {y}"
-                        except Exception:
-                            return date_str
-
-                    # Per-stage colour palette (matches the matrix grid scheme)
-                    _stage_colour = {
-                        1: "#ef4444",  # red — pre-revenue / speculative
-                        2: "#f59e0b",  # amber — growth / scaling
-                        3: "#3b82f6",  # blue — mature growth
-                        4: "#22c55e",  # green — cash generation
-                    }
-                    _stage_label = {
-                        1: "Pre-revenue",
-                        2: "Growth",
-                        3: "Mature",
-                        4: "FCF",
-                    }
-
-                    # Build the inline timeline as a single HTML row
-                    _pills_html = '<div style="display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:4px;margin:8px 0 4px 0;overflow-x:auto;padding:6px 0;">'
-                    _n_transitions = 0
-                    for _i, (_d, _stage, _score) in enumerate(_traj):
-                        _colour = _stage_colour.get(_stage, "#64748b")
-                        _qlbl   = _q_label(_d)
-                        _score_str = f"{_score:.2f}" if _score is not None else "—"
-                        _pills_html += (
-                            f'<div title="Weighted score: {_score_str}" '
-                            f'style="background:{_colour};color:#0f172a;padding:8px 12px;'
-                            f'border-radius:10px;text-align:center;font-family:Georgia,serif;'
-                            f'min-width:88px;box-shadow:0 1px 4px rgba(0,0,0,0.3);'
-                            f'border:1.5px solid rgba(255,255,255,0.15);">'
-                            f'<div style="font-size:0.75em;opacity:0.85;font-weight:600;">{_qlbl}</div>'
-                            f'<div style="font-size:0.95em;font-weight:800;line-height:1.1;">Stage {_stage}</div>'
-                            f'<div style="font-size:0.65em;opacity:0.75;font-style:italic;">{_stage_label.get(_stage, "")}</div>'
-                            f'</div>'
-                        )
-                        # Arrow between pills (only between pills, not after the last one)
-                        if _i < len(_traj) - 1:
-                            _next_stage = _traj[_i + 1][1]
-                            _delta = (_next_stage - _stage) if (_next_stage is not None and _stage is not None) else 0
-                            if _delta != 0:
-                                _n_transitions += 1
-                                _delta_colour = "#22c55e" if _delta > 0 else "#ef4444"
-                                _delta_sign = "↑" if _delta > 0 else "↓"
-                                _pills_html += (
-                                    f'<div style="display:flex;flex-direction:column;align-items:center;'
-                                    f'margin:0 4px;color:#38bdf8;font-size:1.4em;font-weight:800;'
-                                    f'line-height:1;">'
-                                    f'<div>⇒</div>'
-                                    f'<div style="font-size:0.55em;color:{_delta_colour};margin-top:2px;'
-                                    f'font-weight:700;">{_delta_sign} {_delta:+d}</div>'
-                                    f'</div>'
+                            if is_current:
+                                td_style  = ("background:#1b3a5c;border:2.5px solid #fbbf24;"
+                                             "color:#fde68a;font-weight:700;")
+                                content   = (
+                                    f"{CAT_SHORT[cat]}<br>"
+                                    f"<span style='font-size:0.85em;opacity:0.95;'>S{s}</span><br>"
+                                    f"<span style='font-size:0.92em;color:#7dd3fc;font-weight:700;'>▶ {ticker_symbol}</span>"
                                 )
+                            elif same_stage:
+                                # Brighter blue text on dim blue background, grey outline
+                                td_style  = "background:#1e293b;border:1px solid #64748b;color:#bfdbfe;"
+                                content   = label_line
+                            elif same_cat:
+                                # Brighter green text on dim green background, grey outline
+                                td_style  = "background:#1a2e22;border:1px solid #64748b;color:#bbf7d0;"
+                                content   = label_line
                             else:
-                                _pills_html += (
-                                    '<div style="color:#64748b;font-size:1.2em;margin:0 2px;'
-                                    'opacity:0.6;">→</div>'
-                                )
-                    _pills_html += '</div>'
+                                # Lighter grey text on very dim background, grey outline
+                                td_style  = "background:#0f172a;border:1px solid #475569;color:#94a3b8;"
+                                content   = label_line
+                            tds += (
+                                f'<td style="{td_style}padding:10px 4px;text-align:center;'
+                                f'font-size:0.82em;width:20%;">{content}</td>'
+                            )
+                        grid_rows.append(f'<tr>{tds}</tr>')
 
-                    st.markdown(_pills_html, unsafe_allow_html=True)
-                    _plural = "s" if _n_transitions != 1 else ""
+                    st.markdown(
+                        '<div style="overflow-x:auto;margin:12px 0 4px 0;">'
+                        '<table style="border-collapse:collapse;width:100%;table-layout:fixed;">'
+                        + "".join(grid_rows)
+                        + '</table></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("🟡 Current cell  ·  blue = same stage  ·  green = same category  ·  grey = other")
+
+                    st.markdown("---")
+
+
+                with _col_L:
+                    # ── Section 4: Financial Health diagnosis (MAIN visible section) ─
+                    st.subheader(f"Financial Health: Stage {fh_stage} — {stage_label.split('— ', 1)[-1]}")
                     st.caption(
-                        f"{_n_transitions} stage transition{_plural} in the last {len(_traj)} quarters. "
-                        f"Hover any pill for its weighted score."
+                        f"Weighted score **{fh_weighted_score:.2f}** · "
+                        f"Classification confidence **{bm_confidence or '—'}**"
                     )
 
-                st.markdown("---")
+                    # Always-visible sub-score table
+                    _fh_sub_scores = {
+                        "FCF Margin (adj)": fh_fcf_stage,
+                        "Gross Margin":     fh_gm_stage,
+                        "Cash Runway":      fh_runway_stage,
+                        "Op. Leverage":     fh_oplev_stage,
+                        "SBC % Rev":        fh_sbc_stage,
+                        "D/E Ratio":        fh_de_stage,
+                        "ROIC":             fh_roic_stage,
+                    }
+                    _weights_ui = FH_STAGE_WEIGHTS_UI.get(fh_stage, FH_STAGE_WEIGHTS_UI[3])
+                    _fh_table_rows = []
+                    for _m_name, _sub_score in _fh_sub_scores.items():
+                        _w = _weights_ui.get(_m_name, 0)
+                        _contrib = round(_w * _sub_score, 3) if _w > 0 else None
+                        _fh_table_rows.append({
+                            "Metric":       _m_name,
+                            "Sub-score":    _sub_score,
+                            "Weight":       f"{_w*100:.0f}" if _w > 0 else "—",
+                            "Contribution": f"{_contrib:.3f}" if _contrib is not None else "—",
+                        })
+                    _fh_table_rows.append({
+                        "Metric":       "Weighted total",
+                        "Sub-score":    "—",
+                        "Weight":       "—",
+                        "Contribution": f"{fh_weighted_score:.3f} → Stage {fh_stage}",
+                    })
+                    render_dark_table(
+                        ["Metric", "Sub-score (1–4)", "Weight (%)", "Contribution"],
+                        [[r["Metric"], r["Sub-score"], r["Weight"], r["Contribution"]] for r in _fh_table_rows],
+                    )
+
+                    # Always-visible FCF hard-cap status banner
+                    if fh_fcf_hard_cap:
+                        st.warning("⚠️ FCF hard-cap applied: negative FCF margin capped the stage at Stage 2 regardless of other sub-scores.")
+                    else:
+                        st.success("✅ FCF hard-cap not applied.")
+
+                    # Small expander — methodology + weighting breakdown only
+                    with st.expander("🔎 How was this calculated?"):
+                        st.markdown(
+                            "The stage is a **weighted average of seven sub-scores** (each 1–4), "
+                            "where the weights themselves vary by stage to reflect what matters most "
+                            "at each phase. Stage 1 emphasises survival metrics (runway, FCF); Stage 4 "
+                            "emphasises efficiency and capital allocation (ROIC, D/E)."
+                        )
+                        _weight_str = " · ".join(
+                            f"**{_m}**: {_w:.0%}"
+                            for _m, _w in _weights_ui.items()
+                            if _w > 0
+                        )
+                        st.markdown(f"**Stage {fh_stage} weights →** {_weight_str}")
+
+                    st.markdown("---")
+
+                    # ── Section 4b: Financial Health Trajectory ───────────────────
+                    st.subheader("Financial Health Trajectory")
+                    _traj_rows = conn_vb.execute(
+                        "SELECT as_of_date, fh_stage, fh_weighted_score "
+                        "FROM fh_stage_history "
+                        "WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 8",
+                        (ticker_symbol,),
+                    ).fetchall()
+
+                    if not _traj_rows:
+                        st.info(
+                            f"No historical FH stages recorded for **{ticker_symbol}** yet. "
+                            "Run `python3 backfill_fh_history.py` (zero AV credits) to populate the last 8 quarters."
+                        )
+                    else:
+                        # Reverse to chronological order (oldest → newest)
+                        _traj = list(reversed(_traj_rows))
+
+                        # Helper: format YYYY-MM-DD to Q-label (e.g. "2024-12-31" → "Q4 2024")
+                        def _q_label(date_str):
+                            try:
+                                y, m, _ = date_str.split("-")
+                                q = (int(m) - 1) // 3 + 1
+                                return f"Q{q} {y}"
+                            except Exception:
+                                return date_str
+
+                        # Per-stage colour palette (matches the matrix grid scheme)
+                        _stage_colour = {
+                            1: "#ef4444",  # red — pre-revenue / speculative
+                            2: "#f59e0b",  # amber — growth / scaling
+                            3: "#3b82f6",  # blue — mature growth
+                            4: "#22c55e",  # green — cash generation
+                        }
+                        _stage_label = {
+                            1: "Pre-revenue",
+                            2: "Growth",
+                            3: "Mature",
+                            4: "FCF",
+                        }
+
+                        # Build the inline timeline as a single HTML row
+                        _pills_html = '<div style="display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:4px;margin:8px 0 4px 0;overflow-x:auto;padding:6px 0;">'
+                        _n_transitions = 0
+                        for _i, (_d, _stage, _score) in enumerate(_traj):
+                            _colour = _stage_colour.get(_stage, "#64748b")
+                            _qlbl   = _q_label(_d)
+                            _score_str = f"{_score:.2f}" if _score is not None else "—"
+                            _pills_html += (
+                                f'<div title="Weighted score: {_score_str}" '
+                                f'style="background:{_colour};color:#0f172a;padding:8px 12px;'
+                                f'border-radius:10px;text-align:center;font-family:Georgia,serif;'
+                                f'min-width:88px;box-shadow:0 1px 4px rgba(0,0,0,0.3);'
+                                f'border:1.5px solid rgba(255,255,255,0.15);">'
+                                f'<div style="font-size:0.75em;opacity:0.85;font-weight:600;">{_qlbl}</div>'
+                                f'<div style="font-size:0.95em;font-weight:800;line-height:1.1;">Stage {_stage}</div>'
+                                f'<div style="font-size:0.65em;opacity:0.75;font-style:italic;">{_stage_label.get(_stage, "")}</div>'
+                                f'</div>'
+                            )
+                            # Arrow between pills (only between pills, not after the last one)
+                            if _i < len(_traj) - 1:
+                                _next_stage = _traj[_i + 1][1]
+                                _delta = (_next_stage - _stage) if (_next_stage is not None and _stage is not None) else 0
+                                if _delta != 0:
+                                    _n_transitions += 1
+                                    _delta_colour = "#22c55e" if _delta > 0 else "#ef4444"
+                                    _delta_sign = "↑" if _delta > 0 else "↓"
+                                    _pills_html += (
+                                        f'<div style="display:flex;flex-direction:column;align-items:center;'
+                                        f'margin:0 4px;color:#38bdf8;font-size:1.4em;font-weight:800;'
+                                        f'line-height:1;">'
+                                        f'<div>⇒</div>'
+                                        f'<div style="font-size:0.55em;color:{_delta_colour};margin-top:2px;'
+                                        f'font-weight:700;">{_delta_sign} {_delta:+d}</div>'
+                                        f'</div>'
+                                    )
+                                else:
+                                    _pills_html += (
+                                        '<div style="color:#64748b;font-size:1.2em;margin:0 2px;'
+                                        'opacity:0.6;">→</div>'
+                                    )
+                        _pills_html += '</div>'
+
+                        st.markdown(_pills_html, unsafe_allow_html=True)
+                        _plural = "s" if _n_transitions != 1 else ""
+                        st.caption(
+                            f"{_n_transitions} stage transition{_plural} in the last {len(_traj)} quarters. "
+                            f"Hover any pill for its weighted score."
+                        )
+
+                    st.markdown("---")
+
+
+                with _col_R:
+                    # ── Row 5: VALOURA INTERPRETATION (Gemini-powered) ────────────
+                    _interp_hdr_l, _interp_hdr_r = st.columns([5, 1])
+                    with _interp_hdr_l:
+                        st.subheader("CVE Interpretation")
+                    with _interp_hdr_r:
+                        _regen_clicked = st.button(
+                            "🔄 Regenerate",
+                            key=f"regen_interp_{ticker_symbol}",
+                            help="Clear cache and re-call Gemini",
+                            use_container_width=True,
+                        )
+
+                    _interp_cache_key = f"valoura_interp_{ticker_symbol}_{as_of_date}"
+                    if _regen_clicked and _interp_cache_key in st.session_state:
+                        del st.session_state[_interp_cache_key]
+
+                    if _interp_cache_key not in st.session_state:
+                        # Build the context payload from the data we already have in scope
+                        _cur_metrics_row = conn_vb.execute(
+                            "SELECT fcf_margin_adj, gross_margin, revenue_growth_yoy, "
+                            "operating_leverage, sbc_pct_revenue, debt_equity_ratio, "
+                            "net_income_quality_flag, is_self_funded "
+                            "FROM computed_metrics WHERE ticker=?",
+                            (ticker_symbol,),
+                        ).fetchone()
+                        if _cur_metrics_row:
+                            (_cm_fcf, _cm_gm, _cm_rg, _cm_opl, _cm_sbc, _cm_de,
+                             _cm_ni_flag, _cm_self_fund) = _cur_metrics_row
+                        else:
+                            _cm_fcf = _cm_gm = _cm_rg = _cm_opl = _cm_sbc = _cm_de = None
+                            _cm_ni_flag = _cm_self_fund = None
+
+                        # valuation_metrics: zip fair-range table with current values
+                        _val_metrics = []
+                        _val_data_local = val_data if (val_row and val_json_str) else {}
+                        for (_dn, _vk, _lo, _hi, _u, _kind) in FAIR_RANGES_FULL.get(matrix_cell, []):
+                            _cv = _val_data_local.get(_vk)
+                            _verdict = None
+                            if _cv is not None:
+                                try:
+                                    _cvf = float(_cv)
+                                    if _kind == "yield":
+                                        _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf > _hi else "rich")
+                                    elif _kind == "score":
+                                        _verdict = "good" if _lo <= _cvf <= _hi else ("strong" if _cvf > _hi else "weak")
+                                    else:
+                                        _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf < _lo else "rich")
+                                except (TypeError, ValueError):
+                                    pass
+                            _val_metrics.append({
+                                "metric_name": _dn,
+                                "metric_value": _cv,
+                                "fair_range_low": _lo,
+                                "fair_range_high": _hi,
+                                "unit": _u,
+                                "verdict": _verdict,
+                            })
+
+                        # cell_peers: tickers in same matrix_cell with primary metric value
+                        _cell_peer_rows = conn_vb.execute(
+                            "SELECT c.ticker, v.primary_method, v.valuation_json "
+                            "FROM classifications c LEFT JOIN valuations v ON c.ticker=v.ticker "
+                            "WHERE c.matrix_cell=?",
+                            (matrix_cell,),
+                        ).fetchall()
+                        _cell_peers = []
+                        _primary_keys_for_cell = [t[1] for t in FAIR_RANGES_FULL.get(matrix_cell, [])][:1]
+                        _primary_key = _primary_keys_for_cell[0] if _primary_keys_for_cell else None
+                        for _pr_ticker, _pr_method, _pr_json in _cell_peer_rows:
+                            _pv = None
+                            if _pr_json and _primary_key:
+                                try:
+                                    _pv = json.loads(_pr_json).get(_primary_key)
+                                except Exception:
+                                    pass
+                            _cell_peers.append({
+                                "ticker": _pr_ticker,
+                                "primary_metric": _primary_key,
+                                "primary_value": _pv,
+                            })
+
+                        # cell_medians: 4 header metrics for same-cell tickers
+                        _cell_med_query = conn_vb.execute(
+                            "SELECT m.fcf_margin_adj, m.gross_margin, "
+                            "m.revenue_growth_yoy, m.operating_leverage "
+                            "FROM classifications c JOIN computed_metrics m ON c.ticker=m.ticker "
+                            "WHERE c.matrix_cell=?",
+                            (matrix_cell,),
+                        ).fetchall()
+                        import statistics as _stats2
+                        def _med(values):
+                            vs = [v for v in values if v is not None]
+                            return _stats2.median(vs) if vs else None
+                        _cell_medians = {
+                            "fcf_margin_adj":     _med([r[0] for r in _cell_med_query]),
+                            "gross_margin":       _med([r[1] for r in _cell_med_query]),
+                            "revenue_growth_yoy": _med([r[2] for r in _cell_med_query]),
+                            "operating_leverage": _med([r[3] for r in _cell_med_query]),
+                        }
+
+                        # rpo_spread
+                        _rpo_spread = _val_data_local.get("rpo_spread_pp")
+
+                        # active_flags — synthesise from quality / qualifier fields
+                        _flags = []
+                        if _cm_ni_flag:
+                            _flags.append("net_income_quality_flag")
+                        if fh_fcf_hard_cap:
+                            _flags.append("fh_fcf_hard_cap_applied")
+                        if _val_data_local.get("rpo_qualifier_note"):
+                            _flags.append(f"rpo:{_val_data_local['rpo_qualifier_note']}")
+                        if _cm_self_fund == 0:
+                            _flags.append("not_self_funded")
+
+                        _context = {
+                            "ticker":               ticker_symbol,
+                            "as_of_date":           as_of_date,
+                            "bm_category":          bm_category,
+                            "fh_stage":             fh_stage,
+                            "matrix_cell":          matrix_cell,
+                            "fh_weighted_score":    fh_weighted_score,
+                            "fcf_margin_adj":       _cm_fcf,
+                            "gross_margin":         _cm_gm,
+                            "revenue_growth_yoy":   _cm_rg,
+                            "operating_leverage":   _cm_opl,
+                            "sbc_pct_revenue":      _cm_sbc,
+                            "debt_equity_ratio":    _cm_de,
+                            "valuation_metrics":    _val_metrics,
+                            "cell_peers":           _cell_peers,
+                            "cell_medians":         _cell_medians,
+                            "rpo_spread":           _rpo_spread,
+                            "active_flags":         _flags,
+                        }
+
+                        with st.spinner("Generating CVE interpretation..."):
+                            _result, _err = _generate_valoura_interpretation(_context)
+                        if _result:
+                            st.session_state[_interp_cache_key] = _result
+                        else:
+                            st.session_state[_interp_cache_key] = {"_error": _err}
+
+                    _interp = st.session_state.get(_interp_cache_key, {})
+                    if "_error" in _interp:
+                        st.info("Interpretation unavailable — Gemini API error. Check GEMINI_API_KEY and credits.")
+                        st.caption(f"_Debug: {_interp.get('_error', 'unknown')}_")
+                    else:
+                        # Render structured fields with labelled blocks
+                        if _interp.get("classification_summary"):
+                            st.markdown("**Classification summary**")
+                            st.write(_interp["classification_summary"])
+                        if _interp.get("valuation_position"):
+                            st.markdown("**Valuation position**")
+                            st.write(_interp["valuation_position"])
+                        if _interp.get("strongest_signal"):
+                            st.markdown("**Strongest signal**")
+                            st.write(_interp["strongest_signal"])
+                        if _interp.get("tension"):
+                            st.markdown("**Tension in the data**")
+                            st.write(_interp["tension"])
+                        if _interp.get("peer_context"):
+                            st.markdown("**Peer context**")
+                            st.write(_interp["peer_context"])
+                        if _interp.get("data_caveats"):
+                            st.markdown("🔍 **Data caveats**")
+                            st.write(_interp["data_caveats"])
+
+                    st.markdown(
+                        "<p style='color:#94a3b8;font-style:italic;font-size:0.82em;"
+                        "margin-top:14px;border-top:1px solid #1e293b;padding-top:10px;'>"
+                        "This interpretation is generated from quantitative classification data only. "
+                        "It is not financial advice and does not constitute a recommendation to buy "
+                        "or sell any security."
+                        "</p>",
+                        unsafe_allow_html=True,
+                    )
+
+                with _col_R:
+                    # ── Row 2: Valuation metrics ──────────────────────────────────
+                    if val_row:
+
+                        st.subheader(f"Valuation — {primary_method or 'Context-specific'}")
+
+                        # Only show non-None, non-RPO entries (layout unchanged)
+                        display_items = [
+                            (k, v) for k, v in val_data.items()
+                            if v is not None and k in METRIC_LABELS
+                        ]
+
+                        if display_items:
+                            st.caption("🔍 *Hover over the ⓘ icon next to each metric label for what the metric is, how it's used, and what high/low values typically mean.*")
+                            metric_cols = st.columns(min(len(display_items), 4))
+                            for idx, (key, value) in enumerate(display_items):
+                                label, suffix = METRIC_LABELS[key]
+                                col = metric_cols[idx % len(metric_cols)]
+
+                                # 3-bullet tooltip (what / how used / interpretation) — renders on hover
+                                help_text = METRIC_TOOLTIPS.get(
+                                    key,
+                                    "See CLAUDE.md for metric definitions."
+                                )
+
+                                try:
+                                    if suffix == "%":
+                                        col.metric(label, f"{float(value):.1f}%", help=help_text)
+                                    elif suffix == "$B":
+                                        col.metric(label, f"${float(value)/1e9:.1f}B", help=help_text)
+                                    else:
+                                        col.metric(label, f"{float(value):.2f}x", help=help_text)
+                                except (TypeError, ValueError):
+                                    col.metric(label, str(value), help=help_text)
+
+                        # RPO qualifier banner (unchanged)
+                        rpo_q = val_data.get("rpo_qualifier")
+                        if rpo_q:
+                            rpo_icons = {
+                                "forward_demand_ahead":        "📈",
+                                "neutral":                     "↔️",
+                                "forward_demand_decelerating": "📉",
+                            }
+                            rpo_icon   = rpo_icons.get(rpo_q, "📊")
+                            rpo_spread = val_data.get("rpo_spread_pp")
+                            spread_str = ""
+                            if rpo_spread is not None:
+                                spread_str = f" (+{rpo_spread:.1f}pp)" if rpo_spread >= 0 else f" ({rpo_spread:.1f}pp)"
+                            rpo_note = val_data.get("rpo_qualifier_note", "")
+                            st.info(
+                                f"{rpo_icon} **RPO Signal:** {rpo_q.replace('_', ' ').title()}"
+                                f"{spread_str}" + (f" — {rpo_note}" if rpo_note else "")
+                            )
+
+                        # Addition 3: Full fair-range reference — 3 columns only (no Verdict)
+                        fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
+                        if fair_rows:
+                            th_s = ("padding:14px 18px;text-align:left;color:#7dd3fc;"
+                                    "font-size:1.05em;font-weight:700;"
+                                    "border-bottom:2px solid rgba(56,189,248,0.35);"
+                                    "background:rgba(14,165,233,0.07);")
+                            td_s = ("padding:13px 18px;font-size:1.02em;font-weight:500;"
+                                    "border-bottom:1px solid #334155;color:#f1f5f9;")
+                            rows_html = []
+                            for (disp_name, val_key, fr_low, fr_high, fr_unit, kind) in fair_rows:
+                                cur_raw = val_data.get(val_key)
+                                # Unit lives in the Metric name now — strip from values
+                                cur_str = "—" if cur_raw is None else (
+                                    f"{float(cur_raw):.1f}"
+                                    if isinstance(cur_raw, (int, float))
+                                    else str(cur_raw)
+                                )
+                                rows_html.append(
+                                    f'<tr>'
+                                    f'<td style="{td_s}font-weight:600;">{disp_name} ({fr_unit})</td>'
+                                    f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}</td>'
+                                    f'<td style="{td_s}text-align:center;font-weight:700;color:#38bdf8;">{cur_str}</td>'
+                                    f'</tr>'
+                                )
+                            st.markdown(
+                                '<div style="background:rgba(15,23,42,0.6);'
+                                'border:2px solid rgba(56,189,248,0.3);'
+                                'border-radius:12px;padding:6px;margin:18px 0 8px 0;'
+                                'box-shadow:0 4px 14px rgba(0,0,0,0.3);">'
+                                '<div style="font-size:1.3em;font-weight:800;color:#7dd3fc;'
+                                f'padding:14px 18px 8px 18px;font-family:Times New Roman,Times,serif;">'
+                                f'Fair-Range Reference — {matrix_cell}'
+                                '</div>'
+                                '<table style="border-collapse:collapse;width:100%;">'
+                                '<thead><tr>'
+                                f'<th style="{th_s}">Metric</th>'
+                                f'<th style="{th_s}text-align:center;">Fair Range</th>'
+                                f'<th style="{th_s}text-align:center;">Current</th>'
+                                '</tr></thead><tbody>'
+                                + "".join(rows_html)
+                                + '</tbody></table></div>',
+                                unsafe_allow_html=True,
+                            )
+
+                        st.markdown("---")
+
+
+                with _col_R:
+                    # ── Section 10: Compare to Industry table ─────────────────────
+                    # Dual mode:
+                    #   Mode A: ≥3 tickers in same matrix_cell → show that cell's
+                    #           primary metric for each peer + Good/Fair/Poor verdict
+                    #   Mode B: <3 in cell → broaden to same bm_category and show
+                    #           3–4 BM-relevant multiples side-by-side
+                    _bm_label = CAT_DISPLAY.get(bm_category, bm_category.replace("_", " ").title())
+
+                    # BM-relevant multiples (Mode B columns)
+                    BM_COMPARE_COLS = {
+                        "hyperscale": [
+                            ("capex_adj_ev_ebit", "CapEx EV/EBIT", "x"),
+                            ("peg_ratio",          "PEG",           "x"),
+                            ("ev_ebitda",          "EV/EBITDA",     "x"),
+                            ("rule_of_40",         "Rule of 40",    "%"),
+                        ],
+                        "saas": [
+                            ("ev_ntm_arr",         "EV/NTM ARR",    "x"),
+                            ("ev_fcf",             "EV/FCF",        "x"),
+                            ("peg_ratio",          "PEG",           "x"),
+                            ("rule_of_40",         "Rule of 40",    "%"),
+                        ],
+                        "semi_hardware": [
+                            ("cycle_adj_pe",       "Cycle P/E",     "x"),
+                            ("peg_ratio",          "PEG",           "x"),
+                            ("ev_ebitda",          "EV/EBITDA",     "x"),
+                            ("rule_of_40",         "Rule of 40",    "%"),
+                        ],
+                        "consumer_internet": [
+                            ("ev_ebitda",          "EV/EBITDA",     "x"),
+                            ("peg_ratio",          "PEG",           "x"),
+                            ("pe_ratio",           "P/E",           "x"),
+                            ("rule_of_40",         "Rule of 40",    "%"),
+                        ],
+                        "deep_tech": [
+                            ("ps_ratio",           "P/S",           "x"),
+                            ("ev_gross_profit",    "EV/GP",         "x"),
+                            ("ev_ntm_arr",         "EV/NTM Rev",    "x"),
+                            ("rule_of_40",         "Rule of 40",    "%"),
+                        ],
+                    }
+
+                    # Shared formatters — UNIT-LESS (the unit lives in the column header now)
+                    def _fmt_pct(v):
+                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
+                    def _fmt_pp(v):
+                        return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
+                    def _fmt_x(v):
+                        return "—" if v is None or pd.isna(v) else f"{float(v):.2f}"
+                    def _fmt_unit(v, unit):
+                        if v is None or pd.isna(v):
+                            return "—"
+                        if unit == "%":
+                            return f"{float(v):.1f}"
+                        return f"{float(v):.2f}"
+
+                    # How many tickers share the current matrix_cell?
+                    _cell_count = conn_vb.execute(
+                        "SELECT COUNT(*) FROM classifications WHERE matrix_cell = ?", (matrix_cell,)
+                    ).fetchone()[0]
+
+                    _MODE_A_THRESHOLD = 3
+
+                    st.subheader(f"Compare to Industry — {_bm_label}")
+
+                    if _cell_count >= _MODE_A_THRESHOLD:
+                        # ── MODE A: same matrix cell, value on cell's primary metric ──
+                        _fair_rows_for_cell = FAIR_RANGES_FULL.get(matrix_cell, [])
+                        if _fair_rows_for_cell:
+                            _disp_name, _val_key, _lo, _hi, _u, _kind = _fair_rows_for_cell[0]
+                        else:
+                            _disp_name, _val_key, _lo, _hi, _u, _kind = ("Primary", None, None, None, "x", "multiple")
+
+                        # Get cell's primary method (consistent across cell)
+                        _pm_row = conn_vb.execute(
+                            "SELECT primary_method FROM valuations WHERE matrix_cell = ? LIMIT 1",
+                            (matrix_cell,)
+                        ).fetchone()
+                        _primary_method = _pm_row[0] if _pm_row else "—"
+
+                        st.caption(
+                            f"All tickers in matrix cell **{matrix_cell}** — valued on the "
+                            f"cell's primary method ({_primary_method})."
+                        )
+
+                        _select_cols = (
+                            "c.ticker, c.fh_stage, "
+                            "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
+                            f"v.{_val_key} AS primary_val" if _val_key else
+                            "c.ticker, c.fh_stage, "
+                            "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
+                            "NULL AS primary_val"
+                        )
+                        _peer_rows_raw = conn_vb.execute(
+                            f"""
+                            SELECT {_select_cols}
+                            FROM classifications c
+                            LEFT JOIN computed_metrics m ON c.ticker = m.ticker
+                            LEFT JOIN valuations v ON c.ticker = v.ticker
+                            WHERE c.matrix_cell = ?
+                            ORDER BY c.ticker ASC
+                            """,
+                            (matrix_cell,),
+                        ).fetchall()
+
+                        _headers_a = ["Ticker", "FH Stage", "FCF Margin adj (%)", "Gross Margin (%)",
+                                      "Rev Growth YoY (%)", "Op Leverage (pp)", f"{_disp_name} ({_u})"]
+                        _rows_a = []
+                        for r in _peer_rows_raw:
+                            _rows_a.append([
+                                r[0],
+                                f"Stage {int(r[1])}" if r[1] is not None else "—",
+                                _fmt_pct(r[2]),
+                                _fmt_pct(r[3]),
+                                _fmt_pct(r[4]),
+                                _fmt_pp(r[5]),
+                                _fmt_unit(r[6], _u),
+                            ])
+                        render_dark_table(_headers_a, _rows_a, highlight_first_col=ticker_symbol)
+                        st.caption(
+                            f"Peers in matrix cell **{matrix_cell}** — valued on the cell's primary method ({_primary_method}). "
+                            f"Fair range for {_disp_name}: {_lo}–{_hi}{_u}."
+                        )
+
+                    elif _cell_count < _MODE_A_THRESHOLD:
+                        # ── MODE B: broaden to same BM, show BM-relevant multiples ──
+                        _bm_cols = BM_COMPARE_COLS.get(bm_category, [
+                            ("ev_ebitda", "EV/EBITDA", "x"),
+                            ("peg_ratio", "PEG",       "x"),
+                            ("ev_fcf",    "EV/FCF",    "x"),
+                            ("rule_of_40","Rule of 40","%"),
+                        ])
+                        st.caption(
+                            f"Only **{_cell_count}** ticker(s) in matrix cell `{matrix_cell}` — "
+                            f"broadened to all **{_bm_label}** peers. Columns show the most "
+                            f"relevant valuation multiples for this BM."
+                        )
+
+                        _val_cols_sql = ", ".join(f"v.{k}" for (k, _, _) in _bm_cols)
+                        _peer_rows_raw = conn_vb.execute(
+                            f"""
+                            SELECT c.ticker, c.matrix_cell, c.fh_stage,
+                                   m.fcf_margin_adj, m.gross_margin,
+                                   m.revenue_growth_yoy, m.operating_leverage,
+                                   {_val_cols_sql}
+                            FROM classifications c
+                            LEFT JOIN computed_metrics m ON c.ticker = m.ticker
+                            LEFT JOIN valuations v ON c.ticker = v.ticker
+                            WHERE c.bm_category = ?
+                            ORDER BY ABS(c.fh_stage - ?) ASC, c.ticker ASC
+                            """,
+                            (bm_category, fh_stage),
+                        ).fetchall()
+
+                        if len(_peer_rows_raw) > 1:
+                            _headers_b = (["Ticker", "Matrix Cell", "FH Stage", "FCF Margin adj (%)",
+                                           "Gross Margin (%)", "Rev Growth YoY (%)", "Op Leverage (pp)"]
+                                          + [f"{lbl} ({_u})" for (_k, lbl, _u) in _bm_cols])
+                            _rows_b = []
+                            for r in _peer_rows_raw:
+                                _row = [
+                                    r[0],
+                                    r[1],
+                                    f"Stage {int(r[2])}" if r[2] is not None else "—",
+                                    _fmt_pct(r[3]),
+                                    _fmt_pct(r[4]),
+                                    _fmt_pct(r[5]),
+                                    _fmt_pp(r[6]),
+                                ]
+                                for _i, (_k, _label, _u) in enumerate(_bm_cols):
+                                    _row.append(_fmt_unit(r[7 + _i], _u))
+                                _rows_b.append(_row)
+                            render_dark_table(_headers_b, _rows_b, highlight_first_col=ticker_symbol)
+                            st.caption(
+                                f"Showing {len(_rows_b)} **{_bm_label}** tickers. "
+                                f"Same-stage peers grouped first."
+                            )
+                        else:
+                            st.write(
+                                f"No other **{_bm_label}** tickers in the universe yet — "
+                                f"{ticker_symbol} is the only one classified so far."
+                            )
+
+                    st.markdown("---")
+
+
+                with _col_R:
+                    # ── Risk Flags panel (synthesized quality signals) ────────
+                    st.subheader("Risk Flags")
+                    _flags = get_active_flags(conn_vb, ticker_symbol)
+                    if _flags:
+                        for _fname, _fdesc in _flags:
+                            st.warning(f"**{_fname}** — {_fdesc}")
+                    else:
+                        st.success("No active risk flags for this ticker.")
 
                 # ── Section 5: Business Model 5-tab explainer ─────────────────
                 _bm_display_now = CAT_DISPLAY.get(bm_category, bm_category.title())
@@ -2708,6 +3729,7 @@ Private investors who want to understand a stock rather than simply be told what
 
                 st.markdown("---")
 
+
                 # ── Section 6: "How was the Business Model decided?" expander ──
                 with st.expander("🔎 How was the Business Model decided?"):
                     try:
@@ -2756,473 +3778,7 @@ Private investors who want to understand a stock rather than simply be told what
 
                 st.markdown("---")
 
-                # ── Row 2: Valuation metrics ──────────────────────────────────
-                val_row = conn_vb.execute(
-                    "SELECT primary_method, valuation_json FROM valuations WHERE ticker=?",
-                    (ticker_symbol,)
-                ).fetchone()
 
-                if val_row:
-                    primary_method, val_json_str = val_row
-                    val_data = json.loads(val_json_str) if val_json_str else {}
-
-                    st.subheader(f"Valuation — {primary_method or 'Context-specific'}")
-
-                    # Only show non-None, non-RPO entries (layout unchanged)
-                    display_items = [
-                        (k, v) for k, v in val_data.items()
-                        if v is not None and k in METRIC_LABELS
-                    ]
-
-                    if display_items:
-                        st.caption("🔍 *Hover over the ⓘ icon next to each metric label for what the metric is, how it's used, and what high/low values typically mean.*")
-                        metric_cols = st.columns(min(len(display_items), 4))
-                        for idx, (key, value) in enumerate(display_items):
-                            label, suffix = METRIC_LABELS[key]
-                            col = metric_cols[idx % len(metric_cols)]
-
-                            # 3-bullet tooltip (what / how used / interpretation) — renders on hover
-                            help_text = METRIC_TOOLTIPS.get(
-                                key,
-                                "See CLAUDE.md for metric definitions."
-                            )
-
-                            try:
-                                if suffix == "%":
-                                    col.metric(label, f"{float(value):.1f}%", help=help_text)
-                                elif suffix == "$B":
-                                    col.metric(label, f"${float(value)/1e9:.1f}B", help=help_text)
-                                else:
-                                    col.metric(label, f"{float(value):.2f}x", help=help_text)
-                            except (TypeError, ValueError):
-                                col.metric(label, str(value), help=help_text)
-
-                    # RPO qualifier banner (unchanged)
-                    rpo_q = val_data.get("rpo_qualifier")
-                    if rpo_q:
-                        rpo_icons = {
-                            "forward_demand_ahead":        "📈",
-                            "neutral":                     "↔️",
-                            "forward_demand_decelerating": "📉",
-                        }
-                        rpo_icon   = rpo_icons.get(rpo_q, "📊")
-                        rpo_spread = val_data.get("rpo_spread_pp")
-                        spread_str = ""
-                        if rpo_spread is not None:
-                            spread_str = f" (+{rpo_spread:.1f}pp)" if rpo_spread >= 0 else f" ({rpo_spread:.1f}pp)"
-                        rpo_note = val_data.get("rpo_qualifier_note", "")
-                        st.info(
-                            f"{rpo_icon} **RPO Signal:** {rpo_q.replace('_', ' ').title()}"
-                            f"{spread_str}" + (f" — {rpo_note}" if rpo_note else "")
-                        )
-
-                    # Addition 3: Full fair-range reference — 3 columns only (no Verdict)
-                    fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
-                    if fair_rows:
-                        th_s = ("padding:14px 18px;text-align:left;color:#7dd3fc;"
-                                "font-size:1.05em;font-weight:700;"
-                                "border-bottom:2px solid rgba(56,189,248,0.35);"
-                                "background:rgba(14,165,233,0.07);")
-                        td_s = ("padding:13px 18px;font-size:1.02em;font-weight:500;"
-                                "border-bottom:1px solid #334155;color:#f1f5f9;")
-                        rows_html = []
-                        for (disp_name, val_key, fr_low, fr_high, fr_unit, kind) in fair_rows:
-                            cur_raw = val_data.get(val_key)
-                            # Unit lives in the Metric name now — strip from values
-                            cur_str = "—" if cur_raw is None else (
-                                f"{float(cur_raw):.1f}"
-                                if isinstance(cur_raw, (int, float))
-                                else str(cur_raw)
-                            )
-                            rows_html.append(
-                                f'<tr>'
-                                f'<td style="{td_s}font-weight:600;">{disp_name} ({fr_unit})</td>'
-                                f'<td style="{td_s}text-align:center;">{fr_low}–{fr_high}</td>'
-                                f'<td style="{td_s}text-align:center;font-weight:700;color:#38bdf8;">{cur_str}</td>'
-                                f'</tr>'
-                            )
-                        st.markdown(
-                            '<div style="background:rgba(15,23,42,0.6);'
-                            'border:2px solid rgba(56,189,248,0.3);'
-                            'border-radius:12px;padding:6px;margin:18px 0 8px 0;'
-                            'box-shadow:0 4px 14px rgba(0,0,0,0.3);">'
-                            '<div style="font-size:1.3em;font-weight:800;color:#7dd3fc;'
-                            f'padding:14px 18px 8px 18px;font-family:Times New Roman,Times,serif;">'
-                            f'Fair-Range Reference — {matrix_cell}'
-                            '</div>'
-                            '<table style="border-collapse:collapse;width:100%;">'
-                            '<thead><tr>'
-                            f'<th style="{th_s}">Metric</th>'
-                            f'<th style="{th_s}text-align:center;">Fair Range</th>'
-                            f'<th style="{th_s}text-align:center;">Current</th>'
-                            '</tr></thead><tbody>'
-                            + "".join(rows_html)
-                            + '</tbody></table></div>',
-                            unsafe_allow_html=True,
-                        )
-
-                    st.markdown("---")
-
-                # ── Section 10: Compare to Industry table ─────────────────────
-                # Dual mode:
-                #   Mode A: ≥3 tickers in same matrix_cell → show that cell's
-                #           primary metric for each peer + Good/Fair/Poor verdict
-                #   Mode B: <3 in cell → broaden to same bm_category and show
-                #           3–4 BM-relevant multiples side-by-side
-                _bm_label = CAT_DISPLAY.get(bm_category, bm_category.replace("_", " ").title())
-
-                # BM-relevant multiples (Mode B columns)
-                BM_COMPARE_COLS = {
-                    "hyperscale": [
-                        ("capex_adj_ev_ebit", "CapEx EV/EBIT", "x"),
-                        ("peg_ratio",          "PEG",           "x"),
-                        ("ev_ebitda",          "EV/EBITDA",     "x"),
-                        ("rule_of_40",         "Rule of 40",    "%"),
-                    ],
-                    "saas": [
-                        ("ev_ntm_arr",         "EV/NTM ARR",    "x"),
-                        ("ev_fcf",             "EV/FCF",        "x"),
-                        ("peg_ratio",          "PEG",           "x"),
-                        ("rule_of_40",         "Rule of 40",    "%"),
-                    ],
-                    "semi_hardware": [
-                        ("cycle_adj_pe",       "Cycle P/E",     "x"),
-                        ("peg_ratio",          "PEG",           "x"),
-                        ("ev_ebitda",          "EV/EBITDA",     "x"),
-                        ("rule_of_40",         "Rule of 40",    "%"),
-                    ],
-                    "consumer_internet": [
-                        ("ev_ebitda",          "EV/EBITDA",     "x"),
-                        ("peg_ratio",          "PEG",           "x"),
-                        ("pe_ratio",           "P/E",           "x"),
-                        ("rule_of_40",         "Rule of 40",    "%"),
-                    ],
-                    "deep_tech": [
-                        ("ps_ratio",           "P/S",           "x"),
-                        ("ev_gross_profit",    "EV/GP",         "x"),
-                        ("ev_ntm_arr",         "EV/NTM Rev",    "x"),
-                        ("rule_of_40",         "Rule of 40",    "%"),
-                    ],
-                }
-
-                # Shared formatters — UNIT-LESS (the unit lives in the column header now)
-                def _fmt_pct(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
-                def _fmt_pp(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}"
-                def _fmt_x(v):
-                    return "—" if v is None or pd.isna(v) else f"{float(v):.2f}"
-                def _fmt_unit(v, unit):
-                    if v is None or pd.isna(v):
-                        return "—"
-                    if unit == "%":
-                        return f"{float(v):.1f}"
-                    return f"{float(v):.2f}"
-
-                # How many tickers share the current matrix_cell?
-                _cell_count = conn_vb.execute(
-                    "SELECT COUNT(*) FROM classifications WHERE matrix_cell = ?", (matrix_cell,)
-                ).fetchone()[0]
-
-                _MODE_A_THRESHOLD = 3
-
-                st.subheader(f"Compare to Industry — {_bm_label}")
-
-                if _cell_count >= _MODE_A_THRESHOLD:
-                    # ── MODE A: same matrix cell, value on cell's primary metric ──
-                    _fair_rows_for_cell = FAIR_RANGES_FULL.get(matrix_cell, [])
-                    if _fair_rows_for_cell:
-                        _disp_name, _val_key, _lo, _hi, _u, _kind = _fair_rows_for_cell[0]
-                    else:
-                        _disp_name, _val_key, _lo, _hi, _u, _kind = ("Primary", None, None, None, "x", "multiple")
-
-                    # Get cell's primary method (consistent across cell)
-                    _pm_row = conn_vb.execute(
-                        "SELECT primary_method FROM valuations WHERE matrix_cell = ? LIMIT 1",
-                        (matrix_cell,)
-                    ).fetchone()
-                    _primary_method = _pm_row[0] if _pm_row else "—"
-
-                    st.caption(
-                        f"All tickers in matrix cell **{matrix_cell}** — valued on the "
-                        f"cell's primary method ({_primary_method})."
-                    )
-
-                    _select_cols = (
-                        "c.ticker, c.fh_stage, "
-                        "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
-                        f"v.{_val_key} AS primary_val" if _val_key else
-                        "c.ticker, c.fh_stage, "
-                        "m.fcf_margin_adj, m.gross_margin, m.revenue_growth_yoy, m.operating_leverage, "
-                        "NULL AS primary_val"
-                    )
-                    _peer_rows_raw = conn_vb.execute(
-                        f"""
-                        SELECT {_select_cols}
-                        FROM classifications c
-                        LEFT JOIN computed_metrics m ON c.ticker = m.ticker
-                        LEFT JOIN valuations v ON c.ticker = v.ticker
-                        WHERE c.matrix_cell = ?
-                        ORDER BY c.ticker ASC
-                        """,
-                        (matrix_cell,),
-                    ).fetchall()
-
-                    _headers_a = ["Ticker", "FH Stage", "FCF Margin adj (%)", "Gross Margin (%)",
-                                  "Rev Growth YoY (%)", "Op Leverage (pp)", f"{_disp_name} ({_u})"]
-                    _rows_a = []
-                    for r in _peer_rows_raw:
-                        _rows_a.append([
-                            r[0],
-                            f"Stage {int(r[1])}" if r[1] is not None else "—",
-                            _fmt_pct(r[2]),
-                            _fmt_pct(r[3]),
-                            _fmt_pct(r[4]),
-                            _fmt_pp(r[5]),
-                            _fmt_unit(r[6], _u),
-                        ])
-                    render_dark_table(_headers_a, _rows_a, highlight_first_col=ticker_symbol)
-                    st.caption(
-                        f"Peers in matrix cell **{matrix_cell}** — valued on the cell's primary method ({_primary_method}). "
-                        f"Fair range for {_disp_name}: {_lo}–{_hi}{_u}."
-                    )
-
-                elif _cell_count < _MODE_A_THRESHOLD:
-                    # ── MODE B: broaden to same BM, show BM-relevant multiples ──
-                    _bm_cols = BM_COMPARE_COLS.get(bm_category, [
-                        ("ev_ebitda", "EV/EBITDA", "x"),
-                        ("peg_ratio", "PEG",       "x"),
-                        ("ev_fcf",    "EV/FCF",    "x"),
-                        ("rule_of_40","Rule of 40","%"),
-                    ])
-                    st.caption(
-                        f"Only **{_cell_count}** ticker(s) in matrix cell `{matrix_cell}` — "
-                        f"broadened to all **{_bm_label}** peers. Columns show the most "
-                        f"relevant valuation multiples for this BM."
-                    )
-
-                    _val_cols_sql = ", ".join(f"v.{k}" for (k, _, _) in _bm_cols)
-                    _peer_rows_raw = conn_vb.execute(
-                        f"""
-                        SELECT c.ticker, c.matrix_cell, c.fh_stage,
-                               m.fcf_margin_adj, m.gross_margin,
-                               m.revenue_growth_yoy, m.operating_leverage,
-                               {_val_cols_sql}
-                        FROM classifications c
-                        LEFT JOIN computed_metrics m ON c.ticker = m.ticker
-                        LEFT JOIN valuations v ON c.ticker = v.ticker
-                        WHERE c.bm_category = ?
-                        ORDER BY ABS(c.fh_stage - ?) ASC, c.ticker ASC
-                        """,
-                        (bm_category, fh_stage),
-                    ).fetchall()
-
-                    if len(_peer_rows_raw) > 1:
-                        _headers_b = (["Ticker", "Matrix Cell", "FH Stage", "FCF Margin adj (%)",
-                                       "Gross Margin (%)", "Rev Growth YoY (%)", "Op Leverage (pp)"]
-                                      + [f"{lbl} ({_u})" for (_k, lbl, _u) in _bm_cols])
-                        _rows_b = []
-                        for r in _peer_rows_raw:
-                            _row = [
-                                r[0],
-                                r[1],
-                                f"Stage {int(r[2])}" if r[2] is not None else "—",
-                                _fmt_pct(r[3]),
-                                _fmt_pct(r[4]),
-                                _fmt_pct(r[5]),
-                                _fmt_pp(r[6]),
-                            ]
-                            for _i, (_k, _label, _u) in enumerate(_bm_cols):
-                                _row.append(_fmt_unit(r[7 + _i], _u))
-                            _rows_b.append(_row)
-                        render_dark_table(_headers_b, _rows_b, highlight_first_col=ticker_symbol)
-                        st.caption(
-                            f"Showing {len(_rows_b)} **{_bm_label}** tickers. "
-                            f"Same-stage peers grouped first."
-                        )
-                    else:
-                        st.write(
-                            f"No other **{_bm_label}** tickers in the universe yet — "
-                            f"{ticker_symbol} is the only one classified so far."
-                        )
-
-                st.markdown("---")
-
-                # ── Row 5: VALOURA INTERPRETATION (Gemini-powered) ────────────
-                _interp_hdr_l, _interp_hdr_r = st.columns([5, 1])
-                with _interp_hdr_l:
-                    st.subheader("CVE Interpretation")
-                with _interp_hdr_r:
-                    _regen_clicked = st.button(
-                        "🔄 Regenerate",
-                        key=f"regen_interp_{ticker_symbol}",
-                        help="Clear cache and re-call Gemini",
-                        use_container_width=True,
-                    )
-
-                _interp_cache_key = f"valoura_interp_{ticker_symbol}_{as_of_date}"
-                if _regen_clicked and _interp_cache_key in st.session_state:
-                    del st.session_state[_interp_cache_key]
-
-                if _interp_cache_key not in st.session_state:
-                    # Build the context payload from the data we already have in scope
-                    _cur_metrics_row = conn_vb.execute(
-                        "SELECT fcf_margin_adj, gross_margin, revenue_growth_yoy, "
-                        "operating_leverage, sbc_pct_revenue, debt_equity_ratio, "
-                        "net_income_quality_flag, is_self_funded "
-                        "FROM computed_metrics WHERE ticker=?",
-                        (ticker_symbol,),
-                    ).fetchone()
-                    if _cur_metrics_row:
-                        (_cm_fcf, _cm_gm, _cm_rg, _cm_opl, _cm_sbc, _cm_de,
-                         _cm_ni_flag, _cm_self_fund) = _cur_metrics_row
-                    else:
-                        _cm_fcf = _cm_gm = _cm_rg = _cm_opl = _cm_sbc = _cm_de = None
-                        _cm_ni_flag = _cm_self_fund = None
-
-                    # valuation_metrics: zip fair-range table with current values
-                    _val_metrics = []
-                    _val_data_local = val_data if (val_row and val_json_str) else {}
-                    for (_dn, _vk, _lo, _hi, _u, _kind) in FAIR_RANGES_FULL.get(matrix_cell, []):
-                        _cv = _val_data_local.get(_vk)
-                        _verdict = None
-                        if _cv is not None:
-                            try:
-                                _cvf = float(_cv)
-                                if _kind == "yield":
-                                    _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf > _hi else "rich")
-                                elif _kind == "score":
-                                    _verdict = "good" if _lo <= _cvf <= _hi else ("strong" if _cvf > _hi else "weak")
-                                else:
-                                    _verdict = "fair" if _lo <= _cvf <= _hi else ("cheap" if _cvf < _lo else "rich")
-                            except (TypeError, ValueError):
-                                pass
-                        _val_metrics.append({
-                            "metric_name": _dn,
-                            "metric_value": _cv,
-                            "fair_range_low": _lo,
-                            "fair_range_high": _hi,
-                            "unit": _u,
-                            "verdict": _verdict,
-                        })
-
-                    # cell_peers: tickers in same matrix_cell with primary metric value
-                    _cell_peer_rows = conn_vb.execute(
-                        "SELECT c.ticker, v.primary_method, v.valuation_json "
-                        "FROM classifications c LEFT JOIN valuations v ON c.ticker=v.ticker "
-                        "WHERE c.matrix_cell=?",
-                        (matrix_cell,),
-                    ).fetchall()
-                    _cell_peers = []
-                    _primary_keys_for_cell = [t[1] for t in FAIR_RANGES_FULL.get(matrix_cell, [])][:1]
-                    _primary_key = _primary_keys_for_cell[0] if _primary_keys_for_cell else None
-                    for _pr_ticker, _pr_method, _pr_json in _cell_peer_rows:
-                        _pv = None
-                        if _pr_json and _primary_key:
-                            try:
-                                _pv = json.loads(_pr_json).get(_primary_key)
-                            except Exception:
-                                pass
-                        _cell_peers.append({
-                            "ticker": _pr_ticker,
-                            "primary_metric": _primary_key,
-                            "primary_value": _pv,
-                        })
-
-                    # cell_medians: 4 header metrics for same-cell tickers
-                    _cell_med_query = conn_vb.execute(
-                        "SELECT m.fcf_margin_adj, m.gross_margin, "
-                        "m.revenue_growth_yoy, m.operating_leverage "
-                        "FROM classifications c JOIN computed_metrics m ON c.ticker=m.ticker "
-                        "WHERE c.matrix_cell=?",
-                        (matrix_cell,),
-                    ).fetchall()
-                    import statistics as _stats2
-                    def _med(values):
-                        vs = [v for v in values if v is not None]
-                        return _stats2.median(vs) if vs else None
-                    _cell_medians = {
-                        "fcf_margin_adj":     _med([r[0] for r in _cell_med_query]),
-                        "gross_margin":       _med([r[1] for r in _cell_med_query]),
-                        "revenue_growth_yoy": _med([r[2] for r in _cell_med_query]),
-                        "operating_leverage": _med([r[3] for r in _cell_med_query]),
-                    }
-
-                    # rpo_spread
-                    _rpo_spread = _val_data_local.get("rpo_spread_pp")
-
-                    # active_flags — synthesise from quality / qualifier fields
-                    _flags = []
-                    if _cm_ni_flag:
-                        _flags.append("net_income_quality_flag")
-                    if fh_fcf_hard_cap:
-                        _flags.append("fh_fcf_hard_cap_applied")
-                    if _val_data_local.get("rpo_qualifier_note"):
-                        _flags.append(f"rpo:{_val_data_local['rpo_qualifier_note']}")
-                    if _cm_self_fund == 0:
-                        _flags.append("not_self_funded")
-
-                    _context = {
-                        "ticker":               ticker_symbol,
-                        "as_of_date":           as_of_date,
-                        "bm_category":          bm_category,
-                        "fh_stage":             fh_stage,
-                        "matrix_cell":          matrix_cell,
-                        "fh_weighted_score":    fh_weighted_score,
-                        "fcf_margin_adj":       _cm_fcf,
-                        "gross_margin":         _cm_gm,
-                        "revenue_growth_yoy":   _cm_rg,
-                        "operating_leverage":   _cm_opl,
-                        "sbc_pct_revenue":      _cm_sbc,
-                        "debt_equity_ratio":    _cm_de,
-                        "valuation_metrics":    _val_metrics,
-                        "cell_peers":           _cell_peers,
-                        "cell_medians":         _cell_medians,
-                        "rpo_spread":           _rpo_spread,
-                        "active_flags":         _flags,
-                    }
-
-                    with st.spinner("Generating CVE interpretation..."):
-                        _result, _err = _generate_valoura_interpretation(_context)
-                    if _result:
-                        st.session_state[_interp_cache_key] = _result
-                    else:
-                        st.session_state[_interp_cache_key] = {"_error": _err}
-
-                _interp = st.session_state.get(_interp_cache_key, {})
-                if "_error" in _interp:
-                    st.info("Interpretation unavailable — Gemini API error. Check GEMINI_API_KEY and credits.")
-                    st.caption(f"_Debug: {_interp.get('_error', 'unknown')}_")
-                else:
-                    # Render structured fields with labelled blocks
-                    if _interp.get("classification_summary"):
-                        st.markdown("**Classification summary**")
-                        st.write(_interp["classification_summary"])
-                    if _interp.get("valuation_position"):
-                        st.markdown("**Valuation position**")
-                        st.write(_interp["valuation_position"])
-                    if _interp.get("strongest_signal"):
-                        st.markdown("**Strongest signal**")
-                        st.write(_interp["strongest_signal"])
-                    if _interp.get("tension"):
-                        st.markdown("**Tension in the data**")
-                        st.write(_interp["tension"])
-                    if _interp.get("peer_context"):
-                        st.markdown("**Peer context**")
-                        st.write(_interp["peer_context"])
-                    if _interp.get("data_caveats"):
-                        st.markdown("🔍 **Data caveats**")
-                        st.write(_interp["data_caveats"])
-
-                st.markdown(
-                    "<p style='color:#94a3b8;font-style:italic;font-size:0.82em;"
-                    "margin-top:14px;border-top:1px solid #1e293b;padding-top:10px;'>"
-                    "This interpretation is generated from quantitative classification data only. "
-                    "It is not financial advice and does not constitute a recommendation to buy "
-                    "or sell any security."
-                    "</p>",
-                    unsafe_allow_html=True,
-                )
 
 # --- Helper Function: Mock AI Analysis ---
 def generate_ai_verdict(info, news, history, ticker=None):
@@ -3361,4 +3917,8 @@ def generate_ai_verdict(info, news, history, ticker=None):
 
 # --- CONTROLLER ---
 if __name__ == "__main__":
+    # Auth wall: no active session → login/signup page only.
+    if not st.session_state.get("user"):
+        render_auth_page()
+        st.stop()
     main_dashboard()
