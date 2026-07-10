@@ -41,3 +41,11 @@ CREATE TABLE IF NOT EXISTS stage_change_log (
 CREATE INDEX IF NOT EXISTS idx_watchlist_user   ON watchlist (user_id);
 CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist (ticker);
 CREATE INDEX IF NOT EXISTS idx_scl_changed_at   ON stage_change_log (changed_at DESC);
+
+-- The app talks to these tables with the anon/publishable key.
+-- Supabase enables RLS by default on dashboard-created tables; with no
+-- policies that blocks ALL reads/writes. Single-team phase: disable RLS.
+-- (Before opening to real users: re-enable + add per-user policies.)
+ALTER TABLE users            DISABLE ROW LEVEL SECURITY;
+ALTER TABLE watchlist        DISABLE ROW LEVEL SECURITY;
+ALTER TABLE stage_change_log DISABLE ROW LEVEL SECURITY;
