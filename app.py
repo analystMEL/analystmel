@@ -1089,6 +1089,7 @@ def render_auth_page():
                 user, err = sign_in(email.strip(), password)
                 if user:
                     st.session_state.user = user
+                    st.session_state.pop("auth_view", None)
                     st.session_state.active_page = "Home"
                     st.rerun()
                 else:
@@ -1096,6 +1097,10 @@ def render_auth_page():
         st.markdown("---")
         if st.button("New here? Create an account", use_container_width=True):
             st.session_state.auth_mode = "signup"
+            st.rerun()
+        if st.button("← Continue browsing without an account", use_container_width=True,
+                     key="auth_browse_login"):
+            st.session_state.pop("auth_view", None)
             st.rerun()
 
     else:  # signup
@@ -1118,6 +1123,7 @@ def render_auth_page():
                 user, err = sign_up(email.strip(), password, display_name.strip())
                 if user:
                     st.session_state.user = user
+                    st.session_state.pop("auth_view", None)
                     st.session_state.active_page = "Home"
                     st.rerun()
                 else:
@@ -1129,6 +1135,10 @@ def render_auth_page():
         st.markdown("---")
         if st.button("Already have an account? Log in", use_container_width=True):
             st.session_state.auth_mode = "login"
+            st.rerun()
+        if st.button("← Continue browsing without an account", use_container_width=True,
+                     key="auth_browse_signup"):
+            st.session_state.pop("auth_view", None)
             st.rerun()
 
 
@@ -1164,94 +1174,137 @@ def _fmt_primary(verdict_tuple):
     return f"{disp} {val:,.2f}"
 
 
-_VERDICT_SPAN = {
-    "Undervalued": '<span style="color:#22c55e;font-weight:700;">Undervalued</span>',
-    "Fair":        '<span style="color:#7dd3fc;font-weight:700;">Fair</span>',
-    "Overvalued":  '<span style="color:#ef4444;font-weight:700;">Overvalued</span>',
-    None:          '<span style="color:#64748b;">—</span>',
-}
+def render_classified_universe(conn):
+    """Classified-ticker grid grouped by business model, pills coloured by
+    FH stage. Shared by the Home and About pages."""
+    st.subheader("Classified Universe")
+    st.caption("Tickers currently covered by the CVE classification engine, grouped by business model and financial health stage.")
+
+    if conn is None:
+        st.info("Database not connected. Ensure `valoura_backtest.db` is in the app directory.")
+        return
+
+    _grid_rows = conn.execute(
+        "SELECT ticker, matrix_cell, bm_category, fh_stage "
+        "FROM classifications ORDER BY bm_category ASC, fh_stage ASC, ticker ASC"
+    ).fetchall()
+    if not _grid_rows:
+        st.info("No tickers classified yet. Run the pipeline to populate the database.")
+        return
+
+    _by_bm = {}
+    for _t, _cell, _bm, _fh in _grid_rows:
+        _by_bm.setdefault(_bm, []).append((_t, _cell, _fh))
+
+    _BM_LABELS = {
+        "hyperscale":        "Hyperscale",
+        "saas":              "SaaS",
+        "semi_hardware":     "Semi / Hardware",
+        "consumer_internet": "Consumer Internet",
+        "deep_tech":         "Deep Tech",
+    }
+    _STAGE_COLOURS = {1: "#ef4444", 2: "#f59e0b", 3: "#3b82f6", 4: "#22c55e"}
+    _STAGE_LABELS = {1: "Stage 1", 2: "Stage 2", 3: "Stage 3", 4: "Stage 4"}
+
+    for _bm_key in ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]:
+        if _bm_key not in _by_bm:
+            continue
+        _tickers_in_bm = _by_bm[_bm_key]
+        _label = _BM_LABELS.get(_bm_key, _bm_key.title())
+        st.markdown(
+            f"<p style='color:#7dd3fc;font-size:1em;font-weight:700;"
+            f"letter-spacing:1px;text-transform:uppercase;margin:18px 0 8px 0;"
+            f"padding-bottom:4px;border-bottom:1px solid rgba(56,189,248,0.2);'>"
+            f"{_label} — {len(_tickers_in_bm)} tickers</p>",
+            unsafe_allow_html=True,
+        )
+        _pills_html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;">'
+        for _tick, _cell, _fh in _tickers_in_bm:
+            _col = _STAGE_COLOURS.get(_fh, "#64748b")
+            _pills_html += (
+                f'<div title="{_cell}" style="'
+                f'background:{_col}22;border:1px solid {_col}88;'
+                f'border-radius:6px;padding:5px 12px;display:inline-block;">'
+                f'<span style="color:#f1f5f9;font-weight:700;font-size:0.88em;">{_tick}</span>'
+                f'<span style="color:{_col};font-size:0.72em;margin-left:6px;">{_cell.split("-")[1] if "-" in _cell else ""}</span>'
+                f'</div>'
+            )
+        _pills_html += '</div>'
+        st.markdown(_pills_html, unsafe_allow_html=True)
+
+    st.markdown(
+        "<div style='margin-top:16px;display:flex;gap:20px;flex-wrap:wrap;'>"
+        + "".join(
+            f'<span style="font-size:0.82em;color:#94a3b8;">'
+            f'<span style="display:inline-block;width:10px;height:10px;border-radius:2px;'
+            f'background:{_STAGE_COLOURS[s]};margin-right:4px;"></span>{_STAGE_LABELS[s]}</span>'
+            for s in [1, 2, 3, 4]
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Total: {len(_grid_rows)} classified tickers across {len(_by_bm)} business model categories.")
 
 
 def render_home_page(user):
-    """Landing page: watchlist status board, universe summary, recently moved."""
+    """Landing page: watchlist status board, classified universe, recently moved."""
     from supabase_client import get_stage_changes_for_tickers, get_recent_stage_changes
 
     conn = get_db_connection()
-    display_name = user.get("display_name") or "there"
-    st.markdown(f"<div class='fun-header'>Welcome back, {display_name}</div>",
-                unsafe_allow_html=True)
+    _logged_in = bool(user.get("id"))
+    if _logged_in:
+        display_name = user.get("display_name") or "there"
+        st.markdown(f"<div class='fun-header'>Welcome back, {display_name}</div>",
+                    unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='fun-header'>Contextual Valuation Engine</div>",
+                    unsafe_allow_html=True)
 
     # ── Section 1: Watchlist status board ────────────────────────────────
     st.subheader("Your Watchlist")
-    wl_rows = st.session_state.get("_watchlist_cache", [])
-    if not wl_rows:
-        st.info("Add tickers to your watchlist from the analysis page.")
+    if not _logged_in:
+        st.info("Create an account to build a watchlist and get stage-change alerts.")
+        if st.button("👤 Log in / Sign up", key="home_login_prompt", type="primary"):
+            st.session_state.auth_view = True
+            st.rerun()
     else:
-        wl_tickers = [r["ticker"] for r in wl_rows]
-        cls_rows = {r[0]: r for r in _classification_lookup(conn, wl_tickers)}
-        changed_recently = get_stage_changes_for_tickers(wl_tickers, days=7)
+        wl_rows = st.session_state.get("_watchlist_cache", [])
+        if not wl_rows:
+            st.info("Add tickers to your watchlist from the analysis page.")
+        else:
+            wl_tickers = [r["ticker"] for r in wl_rows]
+            cls_rows = {r[0]: r for r in _classification_lookup(conn, wl_tickers)}
+            changed_recently = get_stage_changes_for_tickers(wl_tickers, days=7)
 
-        headers = ["Ticker", "Matrix Cell", "Primary Metric", "Verdict",
-                   "Stage", "Last Updated", "Stage Changed"]
-        rows = []
-        for t in wl_tickers:
-            c = cls_rows.get(t)
-            if c is None:
-                rows.append([t, "not classified", "—", _VERDICT_SPAN[None], "—", "—", "—"])
-                continue
-            _, cell, stage, classified_at, _pm, vjson = c
-            try:
-                vdata = json.loads(vjson) if vjson else {}
-            except Exception:
-                vdata = {}
-            vt = derive_verdict(cell, vdata)
-            changed = t in changed_recently
-            changed_cell = ('<span style="color:#f59e0b;font-weight:800;">YES</span>'
-                            if changed else '<span style="color:#64748b;">—</span>')
-            rows.append([
-                t, cell, _fmt_primary(vt), _VERDICT_SPAN.get(vt[0]),
-                f"Stage {stage}", (classified_at or "")[:10], changed_cell,
-            ])
-        render_dark_table(headers, rows)
-        if changed_recently:
-            st.caption("Amber **YES** = the financial health stage changed in the last pipeline run.")
+            headers = ["Ticker", "Matrix Cell", "Primary Metric",
+                       "Stage", "Last Updated", "Stage Changed"]
+            rows = []
+            for t in wl_tickers:
+                c = cls_rows.get(t)
+                if c is None:
+                    rows.append([t, "not classified", "—", "—", "—", "—"])
+                    continue
+                _, cell, stage, classified_at, _pm, vjson = c
+                try:
+                    vdata = json.loads(vjson) if vjson else {}
+                except Exception:
+                    vdata = {}
+                vt = derive_verdict(cell, vdata)
+                changed = t in changed_recently
+                changed_cell = ('<span style="color:#f59e0b;font-weight:800;">YES</span>'
+                                if changed else '<span style="color:#64748b;">—</span>')
+                rows.append([
+                    t, cell, _fmt_primary(vt),
+                    f"Stage {stage}", (classified_at or "")[:10], changed_cell,
+                ])
+            render_dark_table(headers, rows)
+            if changed_recently:
+                st.caption("Amber **YES** = the financial health stage changed in the last pipeline run.")
 
     st.markdown("---")
 
-    # ── Section 2: Universe summary ──────────────────────────────────────
-    st.subheader("Universe Summary")
-    all_rows = _classification_lookup(conn)
-    buckets = {"Undervalued": [], "Fair": [], "Overvalued": [], "Flagged": []}
-    for t, cell, stage, _ca, _pm, vjson in all_rows:
-        try:
-            vdata = json.loads(vjson) if vjson else {}
-        except Exception:
-            vdata = {}
-        v, _d, _val = derive_verdict(cell, vdata)
-        if v in buckets:
-            buckets[v].append((t, cell))
-        if conn is not None and get_active_flags(conn, t):
-            buckets["Flagged"].append((t, cell))
-
-    _cards = st.columns(4)
-    _card_meta = [
-        ("Undervalued", "#22c55e"), ("Fair", "#7dd3fc"),
-        ("Overvalued", "#ef4444"), ("Flagged", "#f59e0b"),
-    ]
-    for _i, (_name, _colour) in enumerate(_card_meta):
-        with _cards[_i]:
-            if st.button(f"{_name} · {len(buckets[_name])}",
-                         key=f"universe_card_{_name}", use_container_width=True):
-                st.session_state.universe_filter = (
-                    None if st.session_state.get("universe_filter") == _name else _name)
-    _filt = st.session_state.get("universe_filter")
-    if _filt:
-        st.caption(f"Showing **{_filt}** tickers — click the card again to clear.")
-        _sel_rows = [[t, cell] for t, cell in sorted(set(buckets[_filt]))]
-        if _sel_rows:
-            render_dark_table(["Ticker", "Matrix Cell"], _sel_rows)
-        else:
-            st.write(f"No tickers currently classified as {_filt}.")
+    # ── Section 2: Classified universe (by business model + stage) ───────
+    render_classified_universe(conn)
 
     st.markdown("---")
 
@@ -1282,6 +1335,13 @@ def render_watchlist_page(user):
 
     conn = get_db_connection()
     st.markdown("<div class='fun-header'>Watchlist</div>", unsafe_allow_html=True)
+
+    if not user.get("id"):
+        st.info("Create an account to build a watchlist and get stage-change alerts.")
+        if st.button("👤 Log in / Sign up", key="wl_page_login", type="primary"):
+            st.session_state.auth_view = True
+            st.rerun()
+        return
 
     wl_rows = st.session_state.get("_watchlist_cache", [])
     if not wl_rows:
@@ -1314,7 +1374,7 @@ def render_watchlist_page(user):
 
     headers = ["Ticker", "Matrix Cell", "Stage", "FCF Margin adj (%)",
                "Gross Margin (%)", "Rev Growth YoY (%)", "Op Leverage (pp)",
-               "Primary Metric", "Verdict", "Alert"]
+               "Primary Metric", "Alert"]
     rows = []
     for r in wl_rows:
         t = r["ticker"]
@@ -1322,8 +1382,7 @@ def render_watchlist_page(user):
         k = kpis.get(t, (None, None, None, None))
         alert = "🔔" if r.get("alert_on_stage_change") else "—"
         if c is None:
-            rows.append([t, "not classified", "—", "—", "—", "—", "—", "—",
-                         _VERDICT_SPAN[None], alert])
+            rows.append([t, "not classified", "—", "—", "—", "—", "—", "—", alert])
             continue
         _, cell, stage, _ca, _pm, vjson = c
         try:
@@ -1334,7 +1393,7 @@ def render_watchlist_page(user):
         rows.append([
             t, cell, f"Stage {stage}",
             _n(k[0]), _n(k[1]), _n(k[2]), _n(k[3]),
-            _fmt_primary(vt), _VERDICT_SPAN.get(vt[0]), alert,
+            _fmt_primary(vt), alert,
         ])
     render_dark_table(headers, rows)
 
@@ -1721,49 +1780,81 @@ def main_dashboard():
     if 'other_subpage' not in st.session_state:
         st.session_state.other_subpage = "Financial Analysis"
 
-    _user = st.session_state.get("user", {})
+    _user = st.session_state.get("user") or {}
+    _logged_in = bool(_user.get("id"))
     from supabase_client import get_watchlist as _sb_get_watchlist, sign_out as _sb_sign_out
-    _wl_rows = _sb_get_watchlist(_user.get("id"))
+    _wl_rows = _sb_get_watchlist(_user.get("id")) if _logged_in else []
     _wl_count = len(_wl_rows)
     st.session_state["_watchlist_cache"] = _wl_rows
 
-    # Header banner — brand left, user identity right
+    # Header banner — brand centered; identity line only when logged in
+    _identity_html = (
+        f'<div style="color:#7dd3fc;font-size:0.82em;margin-top:2px;">'
+        f'Signed in as <b>{_user.get("display_name", "—")}</b></div>'
+        if _logged_in else ''
+    )
     st.markdown(
         '<div class="valoura-topbar">'
         '<div class="valoura-brand">Contextual Valuation Engine</div>'
-        f'<div style="color:#7dd3fc;font-size:0.82em;margin-top:2px;">'
-        f'Signed in as <b>{_user.get("display_name", "—")}</b></div>'
+        + _identity_html +
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # Nav row: 5 page buttons + bookmark badge + logout on the right
-    _nav_cols = st.columns([1, 1, 1, 1, 1, 0.7, 0.7])
-    for _i, _p in enumerate(PAGES):
-        with _nav_cols[_i]:
-            _is_active = _p == st.session_state.active_page
-            _btn_type  = "primary" if _is_active else "secondary"
-            if st.button(
-                _p,
-                key=f"nav_btn_{_i}",
-                use_container_width=True,
-                type=_btn_type,
-            ):
-                st.session_state.active_page = _p
+    if _logged_in:
+        # Nav row: 5 page buttons + bookmark badge + logout on the right
+        _nav_cols = st.columns([1, 1, 1, 1, 1, 0.7, 0.7])
+        for _i, _p in enumerate(PAGES):
+            with _nav_cols[_i]:
+                _is_active = _p == st.session_state.active_page
+                _btn_type  = "primary" if _is_active else "secondary"
+                if st.button(
+                    _p,
+                    key=f"nav_btn_{_i}",
+                    use_container_width=True,
+                    type=_btn_type,
+                ):
+                    st.session_state.active_page = _p
+                    st.rerun()
+        with _nav_cols[5]:
+            # Bookmark button with watchlist count badge → Watchlist page
+            if st.button(f"🔖 {_wl_count}", key="nav_bookmark_badge",
+                         use_container_width=True,
+                         help="Your watchlist"):
+                st.session_state.active_page = "Watchlist"
                 st.rerun()
-    with _nav_cols[5]:
-        # Bookmark button with watchlist count badge → Watchlist page
-        if st.button(f"🔖 {_wl_count}", key="nav_bookmark_badge",
-                     use_container_width=True,
-                     help="Your watchlist"):
-            st.session_state.active_page = "Watchlist"
-            st.rerun()
-    with _nav_cols[6]:
-        if st.button("Logout", key="nav_logout", use_container_width=True):
-            _sb_sign_out()
-            for _k in ("user", "auth_mode", "_watchlist_cache", "stock_data"):
-                st.session_state.pop(_k, None)
-            st.rerun()
+        with _nav_cols[6]:
+            if st.button("Logout", key="nav_logout", use_container_width=True):
+                _sb_sign_out()
+                for _k in ("user", "auth_mode", "_watchlist_cache", "stock_data"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
+    else:
+        # Logged out: login icon TOP-LEFT with signup pitch under it, then nav
+        _login_col, _nav_area = st.columns([1.3, 5])
+        with _login_col:
+            if st.button("👤 Log in / Sign up", key="nav_login_icon",
+                         type="primary", use_container_width=True):
+                st.session_state.auth_view = True
+                st.rerun()
+            st.caption(
+                "Create an account to be notified when a stock changes stage (1–4), "
+                "or to add stocks to a watchlist for our newsletter!"
+            )
+        with _nav_area:
+            _nav_cols = st.columns(len(PAGES))
+            for _i, _p in enumerate(PAGES):
+                with _nav_cols[_i]:
+                    _is_active = _p == st.session_state.active_page
+                    _btn_type  = "primary" if _is_active else "secondary"
+                    if st.button(
+                        _p,
+                        key=f"nav_btn_{_i}",
+                        use_container_width=True,
+                        type=_btn_type,
+                    ):
+                        st.session_state.active_page = _p
+                        st.rerun()
 
     # JS: tag the Analysis button so CSS can give it an outline when inactive
     st.markdown(
@@ -1956,85 +2047,8 @@ Private investors who want to understand a stock rather than simply be told what
 
         st.markdown("---")
 
-        # --- Classified Ticker Grid ---
-        st.subheader("Classified Universe")
-        st.caption("Tickers currently covered by the CVE classification engine, grouped by business model and financial health stage.")
-
-        if _cve_conn is not None:
-            import statistics as _stats_intro
-
-            _grid_rows = _cve_conn.execute(
-                "SELECT ticker, matrix_cell, bm_category, fh_stage "
-                "FROM classifications ORDER BY bm_category ASC, fh_stage ASC, ticker ASC"
-            ).fetchall()
-
-            if _grid_rows:
-                # Group by bm_category
-                _by_bm = {}
-                for _t, _cell, _bm, _fh in _grid_rows:
-                    _by_bm.setdefault(_bm, []).append((_t, _cell, _fh))
-
-                _BM_LABELS = {
-                    "hyperscale":        "Hyperscale",
-                    "saas":              "SaaS",
-                    "semi_hardware":     "Semi / Hardware",
-                    "consumer_internet": "Consumer Internet",
-                    "deep_tech":         "Deep Tech",
-                }
-                _STAGE_COLOURS = {
-                    1: "#ef4444",
-                    2: "#f59e0b",
-                    3: "#3b82f6",
-                    4: "#22c55e",
-                }
-                _STAGE_LABELS = {1: "Stage 1", 2: "Stage 2", 3: "Stage 3", 4: "Stage 4"}
-
-                for _bm_key in ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]:
-                    if _bm_key not in _by_bm:
-                        continue
-                    _tickers_in_bm = _by_bm[_bm_key]
-                    _label = _BM_LABELS.get(_bm_key, _bm_key.title())
-
-                    # Category heading
-                    st.markdown(
-                        f"<p style='color:#7dd3fc;font-size:1em;font-weight:700;"
-                        f"letter-spacing:1px;text-transform:uppercase;margin:18px 0 8px 0;"
-                        f"padding-bottom:4px;border-bottom:1px solid rgba(56,189,248,0.2);'>"
-                        f"{_label} — {len(_tickers_in_bm)} tickers</p>",
-                        unsafe_allow_html=True,
-                    )
-
-                    # Pill row
-                    _pills_html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;">'
-                    for _tick, _cell, _fh in _tickers_in_bm:
-                        _col = _STAGE_COLOURS.get(_fh, "#64748b")
-                        _pills_html += (
-                            f'<div title="{_cell}" style="'
-                            f'background:{_col}22;border:1px solid {_col}88;'
-                            f'border-radius:6px;padding:5px 12px;display:inline-block;">'
-                            f'<span style="color:#f1f5f9;font-weight:700;font-size:0.88em;">{_tick}</span>'
-                            f'<span style="color:{_col};font-size:0.72em;margin-left:6px;">{_cell.split("-")[1] if "-" in _cell else ""}</span>'
-                            f'</div>'
-                        )
-                    _pills_html += '</div>'
-                    st.markdown(_pills_html, unsafe_allow_html=True)
-
-                st.markdown(
-                    "<div style='margin-top:16px;display:flex;gap:20px;flex-wrap:wrap;'>"
-                    + "".join(
-                        f'<span style="font-size:0.82em;color:#94a3b8;">'
-                        f'<span style="display:inline-block;width:10px;height:10px;border-radius:2px;'
-                        f'background:{_STAGE_COLOURS[s]};margin-right:4px;"></span>{_STAGE_LABELS[s]}</span>'
-                        for s in [1, 2, 3, 4]
-                    )
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
-                st.caption(f"Total: {len(_grid_rows)} classified tickers across {len(_by_bm)} business model categories.")
-            else:
-                st.info("No tickers classified yet. Run the pipeline to populate the database.")
-        else:
-            st.info("Database not connected. Run `backfill_fh_history.py` and ensure `valoura_backtest.db` is in the app directory.")
+        # --- Classified Ticker Grid (shared helper) ---
+        render_classified_universe(_cve_conn)
 
     # --- HOME PAGE (landing — Supabase watchlist + SQLite classifications) ---
     if page == "Home":
@@ -2810,36 +2824,47 @@ Private investors who want to understand a stock rather than simply be told what
 
                 # ── Watchlist bookmark toggle ────────────────────────────────
                 from supabase_client import is_in_watchlist, add_to_watchlist, remove_from_watchlist, set_alert
-                _wl_user = st.session_state.get("user", {})
+                _wl_user = st.session_state.get("user") or {}
                 _wl_uid = _wl_user.get("id")
-                _wl_entry = is_in_watchlist(_wl_uid, ticker_symbol) if _wl_uid else None
-                _bm_col1, _bm_col2, _bm_col3 = st.columns([1.6, 2.4, 3])
-                with _bm_col1:
-                    if _wl_entry:
-                        if st.button("🔖 In watchlist — remove", key=f"wl_toggle_{ticker_symbol}",
-                                     type="primary", use_container_width=True):
-                            remove_from_watchlist(_wl_uid, ticker_symbol)
+                if not _wl_uid:
+                    # Anonymous browsing — prompt to create an account instead
+                    _anon_c1, _anon_c2 = st.columns([1.8, 4])
+                    with _anon_c1:
+                        if st.button("🔖 Log in to add to watchlist",
+                                     key=f"wl_login_{ticker_symbol}", use_container_width=True):
+                            st.session_state.auth_view = True
                             st.rerun()
-                    else:
-                        if st.button("Add to watchlist 🔖", key=f"wl_toggle_{ticker_symbol}",
-                                     use_container_width=True):
-                            _alert_pref = st.session_state.get(f"wl_alert_pref_{ticker_symbol}", False)
-                            _ok, _err = add_to_watchlist(_wl_uid, ticker_symbol, matrix_cell, fh_stage, _alert_pref)
-                            if not _ok:
-                                st.error(_err or "Could not add to watchlist.")
-                            st.rerun()
-                with _bm_col2:
-                    if _wl_entry:
-                        _alert_now = bool(_wl_entry.get("alert_on_stage_change"))
-                        _alert_new = st.toggle("Alert me if this ticker changes stage",
-                                               value=_alert_now, key=f"wl_alert_{ticker_symbol}")
-                        if _alert_new != _alert_now:
-                            set_alert(_wl_uid, ticker_symbol, _alert_new)
-                            st.rerun()
-                    else:
-                        st.toggle("Alert me if this ticker changes stage",
-                                  key=f"wl_alert_pref_{ticker_symbol}",
-                                  help="Applied when you add the ticker to your watchlist")
+                    with _anon_c2:
+                        st.caption("Accounts get stage-change alerts and a personal watchlist.")
+                else:
+                    _wl_entry = is_in_watchlist(_wl_uid, ticker_symbol)
+                    _bm_col1, _bm_col2, _bm_col3 = st.columns([1.6, 2.4, 3])
+                    with _bm_col1:
+                        if _wl_entry:
+                            if st.button("🔖 In watchlist — remove", key=f"wl_toggle_{ticker_symbol}",
+                                         type="primary", use_container_width=True):
+                                remove_from_watchlist(_wl_uid, ticker_symbol)
+                                st.rerun()
+                        else:
+                            if st.button("Add to watchlist 🔖", key=f"wl_toggle_{ticker_symbol}",
+                                         use_container_width=True):
+                                _alert_pref = st.session_state.get(f"wl_alert_pref_{ticker_symbol}", False)
+                                _ok, _err = add_to_watchlist(_wl_uid, ticker_symbol, matrix_cell, fh_stage, _alert_pref)
+                                if not _ok:
+                                    st.error(_err or "Could not add to watchlist.")
+                                st.rerun()
+                    with _bm_col2:
+                        if _wl_entry:
+                            _alert_now = bool(_wl_entry.get("alert_on_stage_change"))
+                            _alert_new = st.toggle("Alert me if this ticker changes stage",
+                                                   value=_alert_now, key=f"wl_alert_{ticker_symbol}")
+                            if _alert_new != _alert_now:
+                                set_alert(_wl_uid, ticker_symbol, _alert_new)
+                                st.rerun()
+                        else:
+                            st.toggle("Alert me if this ticker changes stage",
+                                      key=f"wl_alert_pref_{ticker_symbol}",
+                                      help="Applied when you add the ticker to your watchlist")
 
                 # Preload valuation row (interpretation + valuation cards both need it)
                 val_row = conn_vb.execute(
@@ -2852,102 +2877,100 @@ Private investors who want to understand a stock rather than simply be told what
                 else:
                     primary_method, val_json_str, val_data = None, None, {}
 
-                # ── Two-column layout: left 40% (classification) / right 60% (valuation) ──
+                # ── Classification badges — full-width row, readable across the page ──
+                _b1, _b2, _b3, _b4 = st.columns(4)
+                _b1.metric("Business Model", bm_category.replace("_", " ").title())
+                _b2.metric("Matrix Cell", matrix_cell)
+                _b3.metric("FH Stage", f"Stage {fh_stage}")
+                _b4.metric("Confidence", bm_confidence or "—")
+
+                # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
+                # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
+                # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
+                HEADER_METRICS = {
+                    "FCF Margin Adjusted": (
+                        "fcf_margin_adj", "%",
+                        "- **What it is:** Free cash flow margin, adjusted to add back stock-based compensation (SBC).\n"
+                        "- **How it's used:** The cleanest read of true cash profitability — how much cash the business generates per dollar of revenue, ignoring accounting noise.\n"
+                        "- **High/low:** Above 20% indicates a cash-generative business with pricing power; 5–15% is typical for mature scaling; below 0% means the company is burning cash."
+                    ),
+                    "Gross Margin": (
+                        "gross_margin", "%",
+                        "- **What it is:** Gross profit divided by revenue (revenue minus cost of goods sold).\n"
+                        "- **How it's used:** Measures unit economics — how much revenue is left after the direct cost of producing or delivering the product.\n"
+                        "- **High/low:** Above 70% is typical for software/SaaS; 40–60% for hardware or hyperscale infrastructure; below 30% suggests a commoditised product or scale-economics business."
+                    ),
+                    "Revenue Growth YoY": (
+                        "revenue_growth_yoy", "%",
+                        "- **What it is:** Percentage change in trailing-12-month revenue versus the prior 12 months.\n"
+                        "- **How it's used:** Top-line momentum check; paired with margins to assess whether growth is profitable or just spending-driven.\n"
+                        "- **High/low:** Above 30% indicates strong demand and market expansion; 10–20% is mature growth; below 5% suggests market saturation or competitive pressure."
+                    ),
+                    "Operating Leverage": (
+                        "operating_leverage", "pp",
+                        "- **What it is:** Operating income growth rate minus revenue growth rate (in percentage points).\n"
+                        "- **How it's used:** Shows whether costs are scaling slower than revenue — positive numbers mean margins are expanding as the business grows.\n"
+                        "- **High/low:** Above +5pp means strong margin expansion; near 0pp means linear scaling; negative means costs are growing faster than revenue (margin compression)."
+                    ),
+                }
+
+                _conn_top = get_db_connection()
+                _ticker_in_db = False
+                if _conn_top is not None:
+                    _ticker_in_db = _conn_top.execute(
+                        "SELECT 1 FROM computed_metrics WHERE ticker=?", (ticker_symbol,)
+                    ).fetchone() is not None
+
+                if not _ticker_in_db:
+                    st.info(
+                        f"ℹ️ **{ticker_symbol}** is not yet in the CVE database. "
+                        "Run the data pipeline to ingest fundamentals + classify this ticker."
+                    )
+                else:
+                    # Compute industry median for each header metric across all classified tickers
+                    import statistics as _stats
+                    _cols = [v[0] for v in HEADER_METRICS.values()]
+                    _medians = {}
+                    for _col in _cols:
+                        _vals = [
+                            r[0] for r in _conn_top.execute(
+                                f"SELECT {_col} FROM computed_metrics WHERE {_col} IS NOT NULL"
+                            ).fetchall()
+                        ]
+                        _medians[_col] = _stats.median(_vals) if _vals else None
+
+                    _current_row = _conn_top.execute(
+                        f"SELECT {', '.join(_cols)} FROM computed_metrics WHERE ticker=?",
+                        (ticker_symbol,)
+                    ).fetchone()
+                    _cur_vals = dict(zip(_cols, _current_row)) if _current_row else {}
+
+                    _hc1, _hc2, _hc3, _hc4 = st.columns(4)
+                    _cols_ui = [_hc1, _hc2, _hc3, _hc4]
+                    for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
+                        _cur = _cur_vals.get(_col)
+                        _med = _medians.get(_col)
+                        # Unit lives in the label, not in the value/delta
+                        _label_with_unit = f"{_label} ({_unit})"
+                        with _cols_ui[_idx]:
+                            if _cur is None:
+                                st.metric(_label_with_unit, "—", help=_tip)
+                            else:
+                                _value_str = f"{_cur:.1f}"
+                                if _med is not None:
+                                    _delta = _cur - _med
+                                    _delta_str = f"{_delta:+.1f} vs median ({_med:.1f})"
+                                    # delta_color="normal" → green if positive, red if negative.
+                                    # All 4 metrics are "higher is better" so default is correct.
+                                    st.metric(_label_with_unit, _value_str, delta=_delta_str, help=_tip)
+                                else:
+                                    st.metric(_label_with_unit, _value_str, help=_tip)
+
+                    st.markdown("---")
+
+                # ── Two-column layout: matrix (left 40%) | interpretation (right 60%) ──
                 _col_L, _col_R = st.columns([2, 3], gap="large")
 
-                with _col_L:
-                    # Classification badges (2×2)
-                    _b1, _b2 = st.columns(2)
-                    _b1.metric("Business Model", bm_category.replace("_", " ").title())
-                    _b2.metric("Matrix Cell", matrix_cell)
-                    _b3, _b4 = st.columns(2)
-                    _b3.metric("FH Stage", f"Stage {fh_stage}")
-                    _b4.metric("Confidence", bm_confidence or "—")
-
-                with _col_L:
-                    # ── Top-of-page: 4 fundamental metrics vs industry median ─────────────
-                    # (Replaces the deleted "Comparing to Industry" section from old Valuation Analysis)
-                    # Tooltip text uses markdown bullets — Streamlit renders these inside the help popup.
-                    HEADER_METRICS = {
-                        "FCF Margin Adjusted": (
-                            "fcf_margin_adj", "%",
-                            "- **What it is:** Free cash flow margin, adjusted to add back stock-based compensation (SBC).\n"
-                            "- **How it's used:** The cleanest read of true cash profitability — how much cash the business generates per dollar of revenue, ignoring accounting noise.\n"
-                            "- **High/low:** Above 20% indicates a cash-generative business with pricing power; 5–15% is typical for mature scaling; below 0% means the company is burning cash."
-                        ),
-                        "Gross Margin": (
-                            "gross_margin", "%",
-                            "- **What it is:** Gross profit divided by revenue (revenue minus cost of goods sold).\n"
-                            "- **How it's used:** Measures unit economics — how much revenue is left after the direct cost of producing or delivering the product.\n"
-                            "- **High/low:** Above 70% is typical for software/SaaS; 40–60% for hardware or hyperscale infrastructure; below 30% suggests a commoditised product or scale-economics business."
-                        ),
-                        "Revenue Growth YoY": (
-                            "revenue_growth_yoy", "%",
-                            "- **What it is:** Percentage change in trailing-12-month revenue versus the prior 12 months.\n"
-                            "- **How it's used:** Top-line momentum check; paired with margins to assess whether growth is profitable or just spending-driven.\n"
-                            "- **High/low:** Above 30% indicates strong demand and market expansion; 10–20% is mature growth; below 5% suggests market saturation or competitive pressure."
-                        ),
-                        "Operating Leverage": (
-                            "operating_leverage", "pp",
-                            "- **What it is:** Operating income growth rate minus revenue growth rate (in percentage points).\n"
-                            "- **How it's used:** Shows whether costs are scaling slower than revenue — positive numbers mean margins are expanding as the business grows.\n"
-                            "- **High/low:** Above +5pp means strong margin expansion; near 0pp means linear scaling; negative means costs are growing faster than revenue (margin compression)."
-                        ),
-                    }
-
-                    _conn_top = get_db_connection()
-                    _ticker_in_db = False
-                    if _conn_top is not None:
-                        _ticker_in_db = _conn_top.execute(
-                            "SELECT 1 FROM computed_metrics WHERE ticker=?", (ticker_symbol,)
-                        ).fetchone() is not None
-
-                    if not _ticker_in_db:
-                        st.info(
-                            f"ℹ️ **{ticker_symbol}** is not yet in the CVE database. "
-                            "Run the data pipeline to ingest fundamentals + classify this ticker."
-                        )
-                    else:
-                        # Compute industry median for each header metric across all classified tickers
-                        import statistics as _stats
-                        _cols = [v[0] for v in HEADER_METRICS.values()]
-                        _medians = {}
-                        for _col in _cols:
-                            _vals = [
-                                r[0] for r in _conn_top.execute(
-                                    f"SELECT {_col} FROM computed_metrics WHERE {_col} IS NOT NULL"
-                                ).fetchall()
-                            ]
-                            _medians[_col] = _stats.median(_vals) if _vals else None
-
-                        _current_row = _conn_top.execute(
-                            f"SELECT {', '.join(_cols)} FROM computed_metrics WHERE ticker=?",
-                            (ticker_symbol,)
-                        ).fetchone()
-                        _cur_vals = dict(zip(_cols, _current_row)) if _current_row else {}
-
-                        _hc1, _hc2, _hc3, _hc4 = st.columns(4)
-                        _cols_ui = [_hc1, _hc2, _hc3, _hc4]
-                        for _idx, (_label, (_col, _unit, _tip)) in enumerate(HEADER_METRICS.items()):
-                            _cur = _cur_vals.get(_col)
-                            _med = _medians.get(_col)
-                            # Unit lives in the label, not in the value/delta
-                            _label_with_unit = f"{_label} ({_unit})"
-                            with _cols_ui[_idx]:
-                                if _cur is None:
-                                    st.metric(_label_with_unit, "—", help=_tip)
-                                else:
-                                    _value_str = f"{_cur:.1f}"
-                                    if _med is not None:
-                                        _delta = _cur - _med
-                                        _delta_str = f"{_delta:+.1f} vs median ({_med:.1f})"
-                                        # delta_color="normal" → green if positive, red if negative.
-                                        # All 4 metrics are "higher is better" so default is correct.
-                                        st.metric(_label_with_unit, _value_str, delta=_delta_str, help=_tip)
-                                    else:
-                                        st.metric(_label_with_unit, _value_str, help=_tip)
-
-                        st.markdown("---")
 
                 with _col_L:
                     # ── Section 3: Matrix 5×4 position visualiser ─────────────────
@@ -3917,8 +3940,9 @@ def generate_ai_verdict(info, news, history, ticker=None):
 
 # --- CONTROLLER ---
 if __name__ == "__main__":
-    # Auth wall: no active session → login/signup page only.
-    if not st.session_state.get("user"):
+    # Login is OPTIONAL: anyone can browse. The auth page shows only when
+    # the user explicitly opens it (login icon, or a feature that needs it).
+    if st.session_state.get("auth_view") and not st.session_state.get("user"):
         render_auth_page()
         st.stop()
     main_dashboard()
