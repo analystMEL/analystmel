@@ -327,8 +327,12 @@ def send_stage_change_alerts(changes: list) -> int:
     smtp = None
     try:
         if not dry_run:
-            smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20)
-            smtp.login(sender, password)
+            try:
+                smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20)
+                smtp.login(sender, password)
+            except Exception as e:
+                log.warning(f"SMTP login failed ({e}) — falling back to DRY-RUN for this batch.")
+                smtp, dry_run = None, True
 
         for ch in changes:
             ticker = ch["ticker"]
