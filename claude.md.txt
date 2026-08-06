@@ -1,0 +1,608 @@
+# Valoura — Context-Specific Tech Stock Valuation Engine
+
+## Project Purpose
+Valoura — shipped as the **Contextual Valuation Engine (CVE)** — is a
+context-specific stock valuation algorithm for technology stocks. Every ticker is
+classified along three independent axes, and valuation logic is applied
+conditionally based on the resulting cell.
+
+Two halves:
+1. **Offline pipeline** (`data_pipeline1.py`) — ingests fundamentals, computes
+   metrics, classifies, values, and writes to local SQLite. Re-run as thresholds
+   are calibrated.
+2. **Web app** (`Valuora_Previous_UI/app.py`) — Streamlit front end with Supabase
+   accounts, per-user watchlists, and stage-change email alerts. Reads the SQLite
+   DB; never writes to it.
+
+NOT financial advice. NOT a live trading system.
+
+---
+
+## The Three-Classifier Architecture
+
+Classifiers are deliberately independent — combining them loses signal.
+
+---
+
+### Classifier 1 — Business Model (BM)
+Five mutually exclusive categories evaluated in strict priority order. First match wins.
+
+| Priority | Category | Key Signal |
+|----------|----------|------------|
+| 1 | `saas` | subscription ≥70%, gross margin ≥65%, deferred revenue ratio ≥5%, no owned infra, hardware <10% |
+| 2 | `hyperscale` | owns infra = yes, usage-based ≥25%, gross margin ≥55% |
+| 3 | `semi_hardware` | hardware ≥35% OR (gross margin <55% AND ad revenue <40%) |
+| 4 | `consumer_internet` | advertising ≥40% (POSITIVE rule, not catch-all) |
+| 5 | `deep_tech` | no dominant revenue stream ≥40%, or pre-revenue |
+
+**Classification method** — hybrid rule-based + LLM:
+- Rule-based balance-sheet validators run first (one per category)
+- LLM (Gemini) called ONLY to break ties: 2+ validators pass, OR 0 pass, OR confidence < 0.80
+- `MANUAL_BM_OVERRIDES` short-circuits both validators and LLM (used when AV data
+  structurally can't pass a correct validator — e.g. MSFT PPE not exposed by AV,
+  or when an LLM tiebreaker lands on a category that contradicts the company's
+  actual business model). 19 entries as of 2026-08:
+  ```python
+  MANUAL_BM_OVERRIDES = {
+      # Infra owners AV can't validate (PPE not exposed)
+      "MSFT": "hyperscale", "AMZN": "hyperscale", "GOOGL": "hyperscale",
+      "ORCL": "hyperscale", "IBM": "hyperscale",
+      # "Neocloud" AI hyperscalers — own GPU data centres, usage-based revenue.
+      # Validators read their SaaS-like margins and miss the CapEx intensity.
+      "CRWV": "hyperscale", "NBIS": "hyperscale",
+      # Subscription software the validators/LLM mislabelled
+      "SNOW": "saas", "MDB": "saas", "DOCN": "saas", "U": "saas",
+      # Semiconductor / hardware names that LLM tiebreaks sent to deep_tech
+      "INTC": "semi_hardware", "ADI": "semi_hardware", "NTAP": "semi_hardware",
+      # Consumer platforms mislabelled deep_tech (AR/gaming/gig R&D signals)
+      "DASH": "consumer_internet", "SNAP": "consumer_internet",
+      "TTWO": "consumer_internet",
+      # Frontier R&D with zero-inventory/zero-PPE profiles that look SaaS-like
+      "QBTS": "deep_tech", "BKSY": "deep_tech",
+  }
+  ```
+  **Override policy:** always review a `LOW`-confidence result, and override when
+  the assigned category contradicts the company's primary business model. A LOW
+  confidence score alone is not grounds for an override — the category has to be
+  wrong. (See *Known Open Items* for the deferred hyperscale category split.)
+- `bm_method` values logged per classification: `validator`, `llm_tiebreaker`,
+  `override`, `llm_post_saas_demotion_zero_pass`
+
+**SaaS post-classification gate** — a ticker classified `saas` by validators or LLM
+must additionally clear ONE of:
+1. `deferred_revenue_ratio >= 0.05` (5% of LTM revenue — billed-in-advance proxy)
+2. ARR value present in `manual_metrics.json`
+3. Listed in `MANUAL_BM_OVERRIDES` as "saas"
+
+Failure demotes to next best non-saas category (LLM re-called on remaining
+candidates). This prevents ad-driven or hardware companies riding a loose SaaS label.
+Threshold 5% separates true SaaS (CRM/NET/ADBE/SNOW at 33-72%) from zero-deferred
+companies like RDDT (1.1%) that got saas from the LLM.
+
+---
+
+### Classifier 2 — Financial Health (FH) Stage (1–4)
+Each metric independently maps to a stage 1–4, then weighted-averaged. Result
+rounded to nearest integer → `fh_stage`.
+
+**Stage definitions (anchor = FCF margin adjusted for SBC):**
+| Stage | Name | FCF margin adj |
+|-------|------|----------------|
+| S1 | Cash burning | < -15% |
+| S2 | Growth investing | -15% to +8% |
+| S3 | FCF positive | +8% to +22% |
+| S4 | Cash compounding | > +22% |
+
+**HARD CAP:** if FCF margin adj = Stage 1, overall stage cannot exceed Stage 2
+regardless of other metrics. Prevents high-GM companies burning heavily on S&M
+from being misclassified as healthy.
+
+**Weights (must sum to 100% per column):**
+| Metric | S1 | S2 | S3 | S4 |
+|--------|----|----|----|-----|
+| FCF margin adj | 30 | 30 | 30 | 35 |
+| Cash runway | 45 | 15 | 0 | 0 |
+| Gross margin | 15 | 15 | 15 | 15 |
+| Operating leverage | 0 | 25 | 20 | 10 |
+| SBC % revenue | 5 | 10 | 10 | 5 |
+| Debt/equity | 5 | 5 | 10 | 15 |
+| ROIC | 0 | 0 | 15 | 20 |
+
+**Data quality flags:**
+- `net_income_quality_flag=1` fires when `NI` diverges materially from
+  `OpInc*(1-tax_rate)` — signals non-cash items (goodwill, IP gains) distorting NI.
+  Affects MRVL (large non-cash gain → cycle P/E inflated to 3000+x).
+- `excluded_currency`: tickers where `yfinance.financialCurrency` is not USD are
+  fully skipped (TSM=TWD, ASML=EUR). Currency authority is yfinance, NOT AV.
+- Negative book equity: `debt_equity` returns None when equity ≤ 0 (buyback-heavy
+  mature companies). Score neutral, do not penalise.
+- `MIN_PRIOR_BASE_REVENUE = $10M`: growth rates nulled out when prior-LTM revenue
+  below threshold (JOBY went $111k→$77M = 69,874% — technically correct, useless).
+
+---
+
+### Classifier 3 — Behavioural Sentiment (not yet implemented)
+Planned dual sub-score (0-10 each), kept separate:
+- Hype vs fundamentals (valuation stretch, momentum, retail attention, insider selling)
+- Analyst perspective (consensus, price targets, revision momentum, surprise history)
+
+Combined into a 2×2 tension matrix: low-hype+bullish = entry; high-hype+bullish =
+hold only; low-hype+weak = watch; high-hype+weak = avoid.
+
+---
+
+## Valuation Matrix (20 cells = 5 BM × 4 FH stages)
+
+**Current version: `MATRIX_VERSION = "v2-2026-08"`** (constant in `data_pipeline1.py`).
+Written into every `valuations.valuation_json` row so backtest output is traceable
+to the matrix revision that produced it. Bump it whenever a range or primary
+metric changes.
+
+Two sources of truth, kept in sync:
+- `VALUATION_MATRIX` (`data_pipeline1.py`) — routing string per cell; decides
+  which multiples get computed and stored.
+- `FAIR_RANGES_FULL` (`Valuora_Previous_UI/app.py`) — ordered metric list per
+  cell with fair ranges. **First entry is the PRIMARY metric** and drives the
+  verdict; the rest are secondary qualifiers.
+
+| Cell | Primary (drives verdict) | Secondary |
+|------|--------------------------|-----------|
+| hyperscale-1 | EV/NTM Rev 6–15x | Rule of 40 0–20% |
+| hyperscale-2 | EV/NTM Rev 3–12x | — |
+| hyperscale-3 | CapEx EV/EBIT 20–35x | PEG 0.5–1.5x · R40 25–45% |
+| hyperscale-4 | FCF Yield 2.0–4.0% | PEG 0.5–1.5x · R40 30–50% |
+| saas-1 | EV/NTM Rev 8–20x | Rule of 40 0–20% |
+| saas-2 | EV/NTM ARR 8–18x | Rule of 40 15–35% |
+| saas-3 | EV/FCF 25–45x | PEG 0.8–2.0x · R40 30–50% |
+| saas-4 | FCF Yield 2.0–3.5% | EV/FCF 20–35x · PEG 0.5–1.5x · R40 40–60% |
+| semi_hardware-1 | EV/NTM Rev 0.5–2.0x | — |
+| semi_hardware-2 | EV/NTM Rev 1.5–4.0x | — |
+| semi_hardware-3 | Cycle P/E 20–35x | PEG 0.5–1.5x |
+| semi_hardware-4 | FCF Yield 2.5–4.5% | PEG 0.5–1.2x |
+| consumer_internet-1 | EV/NTM Rev 1–5x | — |
+| consumer_internet-2 | EV/NTM Rev 4–10x | Rule of 40 10–30% |
+| consumer_internet-3 | EV/EBITDA 18–30x | PEG 1.0–2.5x · R40 20–40% |
+| consumer_internet-4 | **P/E 15–25x** | EV/EBITDA 12–18x · PEG 0.8–1.5x |
+| deep_tech-1 | EV/NTM Rev 20–60x | — (EV/Cash fallback, see below) |
+| deep_tech-2 | EV/NTM Rev 5–12x | — |
+| deep_tech-3 | EV/GP 15–30x | Rule of 40 10–30% |
+| deep_tech-4 | FCF Yield 2.0–4.0% | PEG 0.5–1.5x |
+
+### v2 change log (from v1)
+- **hyperscale-2:** CapEx EV/EBIT 40–80x removed → EV/NTM Rev primary. The
+  CapEx-adjusted lens was structurally wrong at S2 where depreciation dominates.
+- **hyperscale-2 floor 6x → 3x (v2.1):** at a 6x floor, mature hyperscalers
+  scored *Undervalued* on scale rather than cheapness (AMZN 3.4x, IBM 3.6x).
+  Both now read *Fair*.
+- **consumer_internet-4:** P/E added as PRIMARY ahead of EV/EBITDA.
+- **deep_tech-1:** `P/S` renamed and re-keyed to `EV/NTM Rev` (same 20–60x band).
+  **No `P/S` string remains in that cell** — verdict and source-label lookups key
+  on the metric-name string, so the rename had to be total.
+- **semi_hardware-3:** Rule of 40 dropped from fair ranges (Cycle P/E + PEG only).
+- **S4 FCF-yield retune:** hyperscale-4 2.0–4.0, saas-4 2.0–3.5,
+  semi_hardware-4 2.5–4.5, deep_tech-4 2.0–4.0 (+PEG).
+
+### deep_tech-1 pre-revenue fallback
+EV/NTM Rev divides by ~zero for pre-revenue names. When `revenue` is null or ≤ 0
+at deep_tech-1, the cell switches to:
+- `primary_method = "EV/Cash and Cash Runway"`
+- `ev_to_cash = enterprise_value / cash_and_equivalents`
+- `metric_label = "EV/Cash"` (so the UI labels it correctly)
+- `cash_runway_months` surfaced as the supporting signal
+
+This is the zero-division guard for pre-revenue names. `EV/Cash` routes through
+the **ratio** branch of `get_verdict()` (lower = cheaper), as do `Cycle_PE` and
+all EV/x multiples; `FCF_yield` routes through the **yield** branch
+(higher = better).
+
+### FLAG_peg_value_trap
+Computed wherever PEG is a cell metric. Fires when **PEG < 0.8 AND LTM YoY
+revenue growth is below the prior quarter's** (decelerating). Writes
+`FLAG_peg_value_trap` into `valuation_json` with the note *"Low PEG with
+decelerating growth — may indicate a value trap rather than undervaluation."*
+and surfaces it in the app's Risk Flags panel. The PEG value itself is never
+suppressed — both are shown. Mirrors the RPO two-quarter-persistence idea:
+direction matters, not the level alone.
+
+### Valuation matrix — general rules
+- PEG applies at S3 and S4 only; never S1/S2 (undefined on near-zero earnings)
+- R40 (Rule of 40 = revenue growth + FCF margin) is context, never a primary multiple
+- Zero-division guard mandatory: `value = num/denom if denom and denom != 0 else None`
+  Return None and display "N/A — pre-revenue". Never crash.
+
+---
+
+## RPO Qualifier System
+
+RPO (Remaining Performance Obligations) is an ASC 606 accounting disclosure —
+formal measure of contracted future revenue not yet recognised.
+
+**Extraction:** `metrics_extractor.py` — keyword-window approach for 10-Qs/10-Ks.
+Searches for RPO section using `_RPO_KEYWORDS`, extracts ±3,000 chars around each
+match, up to 40,000 chars total. Avoids blind head-truncation that missed Notes
+sections in large (8-31MB) SEC HTML filings.
+
+Keywords searched:
+```
+"remaining performance obligation"
+"remaining performance obligations"
+"transaction price allocated to remaining"
+"unsatisfied performance obligation"
+```
+
+**Metrics computed** (stored in `computed_metrics`):
+- `rpo` — current-period RPO (from `manual_metrics.json`)
+- `rpo_prior_year` — same-quarter prior year RPO
+- `rpo_growth_yoy` — `(rpo / rpo_prior_year - 1)` × 100 (%)
+- `rpo_revenue_spread` — `rpo_growth_yoy - revenue_growth_yoy` (percentage points)
+
+**Qualifier states:**
+| State | Condition | Meaning |
+|-------|-----------|---------|
+| `forward_demand_ahead` | spread > +5pp | RPO outpacing revenue — contracted backlog building |
+| `neutral` | -5pp ≤ spread ≤ +5pp, OR single-quarter negative | No decisive signal |
+| `forward_demand_decelerating` | spread < 0pp for 2+ consecutive quarters | Contracted pipeline contracting |
+
+**Qualifier cells:**
+- **Primary role:** hyperscale-S2, hyperscale-S3 (RPO is critical forward demand signal)
+- **Secondary role:** saas-S2, saas-S3 (supplementary context, not primary multiple)
+- No role: semi_hardware, consumer_internet, deep_tech (RPO not standard in these models)
+
+**Known state (as of 2026-05-21):**
+- `rpo_prior_year` still NULL for most tickers (only 1 prior-year extraction cycle
+  completed). Will self-resolve next quarter when current values become prior_year.
+- PANW: -14.2pp spread, single quarter → `neutral` (not yet `forward_demand_decelerating`)
+- SNOW: +13.1pp spread → `forward_demand_ahead` ✓ (primary multiple may understate)
+- ADBE: +1.9pp → `neutral` (flat, no directional signal)
+
+---
+
+## Data Architecture
+
+### Primary financial API — Alpha Vantage (AV)
+Quarterly fundamentals: INCOME_STATEMENT, CASH_FLOW, BALANCE_SHEET.
+
+**Tier: PRO ($50/month) — 75 req/min, NO daily cap.** Active since 2026-08.
+
+```python
+AV_CALLS_PER_MINUTE = int(os.getenv("AV_CALLS_PER_MINUTE", "75"))  # Pro is the default
+AV_SLEEP = 60.0 / AV_CALLS_PER_MINUTE                              # 0.8s at 75/min
+```
+
+No env export is required — the engine defaults to Pro. `~/.zshrc` also sets
+`AV_CALLS_PER_MINUTE=75` explicitly. Override the env var only if AV changes the
+plan ceiling.
+
+**All 25/day free-tier handling has been REMOVED.** The `AV_PRO_TIER` flag is
+deleted; there is no daily-quota logic anywhere in the codebase. The only limit
+that exists on Pro is the per-minute burst ceiling.
+
+**Rate-limit handling (`_av_fetch`):**
+- AV returns HTTP 200 with an `"Information"` or `"Note"` key when the per-minute
+  burst ceiling is hit. Hard errors (`"Error Message"`, delisted ticker) are
+  distinct and never retried.
+- Rate-limit response → **unconditional** exponential backoff (15s / 30s / 60s),
+  retrying up to `AV_RATE_LIMIT_RETRIES = 3` times before returning `None`.
+
+**`AV_LAST_FAILURE_REASON`** (module-level in `data_pipeline1.py`) records *why*
+the most recent fetch returned nothing, so callers stop guessing:
+`rate_limit | api_error | timeout | exception | empty | None`.
+Set on every `_av_fetch` failure path and on the empty-`quarterlyReports` path;
+read by `run_universe.py` to label failures honestly. Before this existed, any
+zero-record fetch was reported as "rate-limit/quota" — which on Pro misattributed
+delisted symbols (JNPR acquired by HPE, ZI reticked to GTM, PSTG not found) as
+throttling.
+
+**Consecutive-failure stop (`run_universe.py`):** 5 consecutive zero-record
+tickers → stop. This is a **structural** failure detector only (dead API key,
+bad symbols, network down). Per-minute bursts are absorbed by the `_av_fetch`
+retry and never reach the counter.
+
+**Measured Pro throughput:** 16 tickers / 38 AV calls in **115 seconds**, zero
+rate-limit responses. The same work took ~2 days on the free tier.
+
+**Other key behaviours:**
+- `INSERT OR IGNORE` on all fundamentals rows — idempotent, safe to re-run
+- Per-statement skip check: if rows already stored for that ticker+statement, AV
+  call is skipped (crucial for partial-load recovery, e.g. INTC IS already stored)
+- CFLT removed from universe (taken private 2026 — AV returns 0 records, yfinance
+  returns "symbol may be delisted")
+
+### Price data — yfinance
+- 5-year daily OHLCV via `yf.download(period="5y")`
+- `financialCurrency` field is the currency authority for non-USD exclusion gate
+- NOT for commercial use — must migrate in production
+
+### SEC EDGAR (RPO only — Prong 2)
+- CIK resolved from `company_tickers.json` (SEC bulk feed, cached locally)
+- CRITICAL: accession number prefix ≠ company CIK (prefix is filing agent's CIK
+  e.g. 1193125 = Edgar Online). Always look up via `_load_ticker_cik_map()`.
+- `sec-edgar-downloader` fetches 10-Qs and 10-Ks into local filing cache
+- `fetch_10q_text()` accepts `target_keywords` parameter → keyword-window extraction
+
+### Manual/Automated KPI extraction — metrics_extractor.py (Prong 3)
+Extracts: `rpo`, `rpo_prior_year`, NRR, ARR, MAU, ARPU, TCV from 8-K press
+releases (primary) and 10-Q fallback.
+- Confidence < 0.80 → `needs_review=True`, written to `low_confidence_extractions`
+- `rpo_prior_year == rpo` → duplicate sanity check → flag for review
+- Output written to `manual_metrics.json`:
+  `{ticker: {metric: {value, unit, period, confidence, source_url, needs_review}}}`
+- Run with: `python3 metrics_extractor.py --all --force`
+
+---
+
+## LLM Configuration
+```python
+GEMINI_MODEL_NAME = "gemini-2.5-flash-lite"   # NOT gemini-2.5-flash (burns thinking tokens)
+LLM_MAX_TOKENS = 400
+GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+```
+**Env var:** `GOOGLE_API_KEY` set in `~/.zshrc`. Both names checked for compatibility.
+Always run via `zsh -c 'source ~/.zshrc 2>/dev/null; python3 ...'` to ensure the
+key is available in subprocess. Direct `python3` calls get `GEMINI_API_KEY=""` and
+fall back to rule-based (Gemini "unavailable" in logs).
+
+LLM is tiebreaker only — rules run first. `fallback_used` flag logged when LLM
+overrides or substitutes for rules.
+
+---
+
+## Database (SQLite: valoura_backtest.db)
+
+Located at: `/Users/ommelwani/.gemini/antigravity/scratch/valoura_backtest.db`
+
+### Tables
+| Table | Purpose |
+|-------|---------|
+| `price_data` | Daily OHLCV per ticker |
+| `fundamentals` | Raw AV quarterly JSON per ticker/statement/fiscal_date |
+| `computed_metrics` | Derived LTM metrics + RPO columns (see below) |
+| `classifications` | BM + FH classification result per ticker/date |
+| `valuations` | Primary multiple + full multiples JSON per ticker/date |
+| `fh_stage_history` | Last 8 quarters of FH stage per ticker (trajectory timeline) |
+| `metrics_extraction_log` | Audit trail for every LLM extraction attempt |
+| `low_confidence_extractions` | Flagged extractions (conf < 0.80) |
+
+### fh_stage_history
+`(ticker, as_of_date, fh_stage, fh_weighted_score, fh_fcf_hard_cap_applied,
+computed_at)`, PK `(ticker, as_of_date)`. Populated by
+`backfill_fh_history(conn, ticker, n_quarters=8)`, which re-slices cached
+fundamentals to each historical quarter end and re-runs
+`classify_financial_health()` on that snapshot. **Zero AV calls** — pure recompute
+from cached data. `run_classification()` refreshes it automatically for every
+ticker it classifies, so the trajectory stays current with no manual step.
+Bootstrap for pre-existing tickers: `python3 backfill_fh_history.py`.
+Currently 747 rows.
+
+### Supabase (user data — separate from the pipeline DB)
+Pipeline data stays in SQLite. **Only user-facing data lives in Supabase**, at
+`https://dhubgamhpzlygbdiarjt.supabase.co`. Schema in
+`Valuora_Previous_UI/supabase_schema.sql`.
+
+| Table | Purpose |
+|-------|---------|
+| `users` | Mirror of Supabase Auth users; `id` = auth uid, plus `display_name` |
+| `watchlist` | Per-user tickers + `matrix_cell` / `stage_at_add` snapshot + `alert_on_stage_change` |
+| `stage_change_log` | Every FH stage transition the pipeline detects |
+
+**RLS is currently DISABLED** on all three (the app uses the anon/publishable
+key; dashboard-created tables enable RLS by default, which blocks all writes
+with no policies defined). Must be re-enabled with per-user policies before
+opening to real users — see *Known Open Items*.
+
+### computed_metrics — key columns
+Standard: `revenue_ltm`, `revenue_growth_yoy`, `gross_margin`, `fcf_ltm`,
+`fcf_margin`, `fcf_margin_adj`, `sbc_ltm`, `sbc_pct_revenue`, `ebitda_ltm`,
+`market_cap`, `enterprise_value`, `deferred_revenue`, `deferred_revenue_ratio`,
+`eps_ltm`, `cash_runway_months`, `roic`, `operating_leverage`
+
+RPO columns (added via `setup_database()` migration):
+`rpo`, `rpo_prior_year`, `rpo_growth_yoy`, `rpo_revenue_spread`
+
+### Schema migration
+`setup_database(conn)` applies ALTER TABLE for new columns if they don't exist.
+Always call before `compute_and_store_metrics`. Safe to call on every run.
+
+Never rename existing `computed_metrics` columns — data sources are mapped onto
+the fixed schema so the classification engine works unchanged.
+
+---
+
+## Files
+
+| File | Role |
+|------|------|
+| `data_pipeline1.py` | Core engine: ingestion, metric computation, BM+FH classification, valuation matrix, RPO qualifier, stage-change detection |
+| `run_universe.py` | Durable, resumable batch runner (scratch root + repo copy — **no longer in /tmp**). Skips already-classified tickers and already-cached statements. `python3 run_universe.py [TICKERS…] [--file list.txt]` |
+| `backfill_fh_history.py` | One-time bootstrap of `fh_stage_history` (zero AV calls) |
+| `metrics_extractor.py` | Automated KPI + RPO extraction from SEC filings (Prong 3) |
+| `manual_metrics.json` | KPI store (auto-populated + manual review queue) |
+| `Valuora_Previous_UI/app.py` | Streamlit web app (CVE) — see *Web Application* below |
+| `Valuora_Previous_UI/supabase_client.py` | All Supabase I/O: auth, watchlist CRUD, stage-change log, alert emails |
+| `Valuora_Previous_UI/supabase_schema.sql` | DDL for the three Supabase tables (one-time paste into the SQL editor) |
+| `claude.md.txt` | This file |
+
+**Deployment:** the repo is `valouraofficial/valoura` (GitHub), auto-deployed by
+Streamlit Cloud from `main`. `data_pipeline1.py` and `valoura_backtest.db` are
+mirrored into `Valuora_Previous_UI/` on every push — the app reads the committed
+DB snapshot.
+
+### Key constants in data_pipeline1.py
+```python
+SAAS_MIN_DEFERRED = 0.05        # SaaS gate threshold
+CYCLE_ADJ_YEARS = 5             # Shiller-style P/E window for semis
+MAINTENANCE_CAPEX_RATIO = 0.50  # Maintenance capex as % of total for hyperscale adj
+EST_TAX_RATE = 0.21             # Used for net_income_quality_flag check only
+MIN_PRIOR_BASE_REVENUE = 10_000_000   # Below this, growth rates nulled out
+MATRIX_VERSION = "v2-2026-08"   # Stamped into every valuations row
+AV_CALLS_PER_MINUTE = 75        # Pro tier default
+AV_SLEEP = 0.8                  # 60 / 75 — seconds between AV API calls
+AV_RATE_LIMIT_RETRIES = 3       # Backoff retries on per-minute throttle
+AV_RATE_LIMIT_BACKOFF = (15, 30, 60)
+```
+
+---
+
+## Ticker Universe
+
+`TICKERS` in `data_pipeline1.py` is the original **49-name seed list**, not the
+current universe. It remains the default argument for `run_universe.py` when no
+tickers are passed, but 94 tickers are now classified — the extras were added by
+passing them explicitly:
+
+```bash
+python3 run_universe.py CRWD DDOG FTNT MU TXN     # ad-hoc names
+python3 run_universe.py --file my_tickers.txt      # or from a file
+python3 run_universe.py                            # falls back to the seed list
+```
+
+The runner is resumable: it skips tickers that already have a classification and
+statements that are already cached, so re-running is safe and costs nothing.
+
+```python
+TICKERS = [
+    # Pure SaaS
+    "PANW","CRM","WDAY","ADBE","TEAM","MDB","NET","DOCN","ZS","SNOW",
+    # Semiconductor / Hardware
+    "AMD","NVDA","TSM","ASML","MRVL","AVGO","QCOM","INTC","KLAC",
+    # Hyperscale
+    "MSFT","GOOGL","AMZN","RKLB","IBM",   # ORCL at tail (swapped for RKLB)
+    # Consumer Internet
+    "META","AAPL","NFLX","SPOT","PINS","SNAP","UBER","ABNB","DASH","ROKU","MTCH","RDDT",
+    # Enterprise Infra / Networking
+    "DELL","ANET","SMCI",
+    # Deep Tech / Space
+    "PLTR","PATH","IONQ","JOBY","RIVN","QBTS","RGTI","ASTS","SOUN","ORCL",
+]
+```
+
+---
+
+## Current Classification State (as of 2026-08)
+
+**94 tickers classified.** The universe has outgrown the static `TICKERS` list —
+new names are added by passing them to `run_universe.py` directly.
+
+| Business model | Count |
+|----------------|-------|
+| `saas` | 30 |
+| `semi_hardware` | 25 |
+| `consumer_internet` | 18 |
+| `deep_tech` | 13 |
+| `hyperscale` | 8 |
+
+**Non-USD exclusions** (yfinance `financialCurrency` gate): TSM (TWD),
+ASML (EUR), SPOT (EUR), BABA (CNY). Price data stored, metrics skipped.
+
+**Known dead symbols** (AV + yfinance both return nothing — do not re-add):
+JNPR (acquired by HPE), ZI (reticked to GTM), PSTG, CFLT (taken private 2026).
+
+**Empty matrix cells** — no ticker currently occupies hyperscale-4, saas-1,
+semi_hardware-1 or deep_tech-4, so those fair ranges are untested against real
+data. Worth populating before the backtest is treated as complete.
+
+**Data-quality watch items:**
+- MRVL cycle P/E = 3061x, inflated by `net_income_quality_flag` (NI includes a
+  $2.67B non-cash gain vs OpInc*(1-tax) = $1.05B).
+- INTC cycle P/E = 784x, AKAM CapEx EV/EBIT = 273x — both real but extreme;
+  the verdict correctly reads Overvalued, but they distort any cell median.
+
+---
+
+## Web Application (Contextual Valuation Engine)
+
+`Valuora_Previous_UI/app.py` — Streamlit, deployed on Streamlit Cloud.
+
+**Auth (Supabase, email + password only — no OAuth).** Login is **optional**:
+anyone can browse anonymously. Logged out, a `👤 Log in / Sign up` button sits
+top-left with the signup pitch under it; watchlist features show prompts instead
+of breaking. Session lives in `st.session_state.user`; the auth page is reached
+via the `auth_view` session flag, and both login and signup offer
+"← Continue browsing without an account".
+
+**Navigation — five items:** `Home · Analysis · Watchlist · About · Other`.
+Legacy pages (Financial Analysis, Company Profile, DCF Model, Macro Stress Test)
+live under **Other** with an auto-fetching live-data gate. Right side of the nav
+carries the 🔖 watchlist-count badge, display name, and Logout when signed in.
+
+**Home** — (1) watchlist status board joining Supabase watchlist against SQLite
+classifications, with an amber flag when a ticker's stage changed in the last
+pipeline run; (2) classified-universe grid grouped by business model, pills
+coloured by FH stage; (3) **Recently Moved** — `stage_change_log` entries from
+the last 30 days, max 10.
+
+**Analysis** — bookmark toggle + "alert me on stage change" at the top, then two
+full-width rows (classification badges, then the four header KPIs), then a 40/60
+split: matrix visualiser + FH scorecard on the left, CVE Interpretation +
+valuation cards + peer comparison + Risk Flags on the right. Ticker selection is
+a searchable `st.selectbox` over classified tickers (`"MSFT — Hyperscale · S3"`),
+with a free-text expander for unclassified tickers that falls back to live data
+only.
+
+**Watchlist** — full KPI detail per ticker, primary metric, alert indicator,
+per-row Remove, and a pipeline-last-run timestamp.
+
+**Rendering note:** `st.dataframe` renders to an HTML5 canvas that **ignores page
+CSS**, so it always looks light-themed. All themed tables go through the
+`render_dark_table(headers, rows, highlight_first_col=None)` helper, which emits
+a real HTML `<table>`. Don't reach for `st.dataframe` on a themed surface.
+
+**Verdicts** are derived at *display* time by `derive_verdict(matrix_cell,
+val_data)` from `FAIR_RANGES_FULL` — they are not stored. Changing a fair range
+therefore takes effect immediately with no recompute.
+
+---
+
+## Stage-Change Detection & Alerts
+
+`run_classification()` snapshots the previous `fh_stage` **before** the
+`INSERT OR REPLACE`, and on a change:
+1. appends to `STAGE_CHANGES_THIS_RUN` (module-level, for run reporting),
+2. writes a row to Supabase `stage_change_log`,
+3. calls `send_stage_change_alerts()`.
+
+All of it is `try/except` wrapped — an offline run or unconfigured Supabase never
+breaks the pipeline. `_get_supabase_client_module()` imports `supabase_client`
+with a path fallback into `Valuora_Previous_UI/`.
+
+**Alert emails** — plain text via `smtplib` (Gmail SMTP-SSL, port 465). Queries
+Supabase for users with that ticker in their watchlist and
+`alert_on_stage_change = TRUE`. Credentials come from `ALERT_EMAIL` /
+`ALERT_EMAIL_PASSWORD` (a 16-character Google **App Password**, not the account
+password). **Missing or bad credentials → DRY-RUN**: the batch logs
+`[DRY-RUN] Would email …` and continues, rather than raising. Verified end to end
+with a real send on 2026-07-16.
+
+Emails are sent **by the pipeline running locally**, so the credentials must be
+in `~/.zshrc` — putting them only in Streamlit Cloud secrets is not enough.
+
+---
+
+## Conventions
+
+- All metrics on LTM (last 12 months) basis except balance sheet items (MRQ).
+- SBC adjustment applied to FCF BEFORE FCF margin threshold is checked.
+- FCF margin adj = (FCF - SBC) / Revenue.
+- Cyclical correction: semis use `cycle_adj_pe` (5-yr avg NI), never trailing P/E.
+- Standalone modules (metrics_extractor.py) read/write the same SQLite DB.
+- `data_pipeline1.py` owns the schema (setup_database). Other files never ALTER.
+- Log every LLM call and fallback path for audit trail.
+- `as_of_date` = date of most recent fiscal quarter end used in computation.
+
+---
+
+## Known Open Items
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| **Hyperscale category split — DEFERRED** | Decided | Splitting `hyperscale` into *pure cloud infrastructure* (MSFT/GOOGL/AMZN/CRWV/NBIS — usage-based compute, extreme CapEx) vs *diversified mega-cap* (IBM/ORCL — mixed legacy services + cloud) was considered and **deliberately deferred until after the backtest**. The two groups have genuinely different CapEx intensity and margin structure, and an 8-ticker category spanning both is doing real work to hold them together. But re-cutting the taxonomy now would invalidate the historical backfill: `fh_stage_history`, `stage_change_log` and every stored `valuations` row are keyed to the current `matrix_cell` strings, so a split means re-running the whole backfill against a moving target. **Backtest against the frozen v2 taxonomy first, then split with a `MATRIX_VERSION` bump and one clean re-run.** |
+| Supabase RLS disabled | High | RLS is off on `users`, `watchlist`, `stage_change_log` so the anon key can write. Re-enable with per-user policies before real users. |
+| yfinance commercial use | High | Must migrate to licensed price data before production |
+| Empty matrix cells | Medium | hyperscale-4, saas-1, semi_hardware-1, deep_tech-4 have no occupants — ranges untested |
+| MRVL / INTC cycle P/E | Medium | Add `MANUAL_CYCLE_PE_EXCLUSIONS` guard for `net_income_quality_flag` tickers; extreme values distort cell medians |
+| `rpo_prior_year` coverage | Low | NULL for several tickers; self-resolves next extraction cycle |
+| Non-USD AV credits | Low | 3 AV credits burned before the currency gate fires (TSM/ASML/SPOT/BABA). Cheap on Pro, but add a pre-fetch currency check |
+| Sentiment classifier (C3) | Future | Not yet implemented; placeholder in architecture |
+| FH weight sensitivity | Future | Sensitivity-test S3/S4 FCF boundary ±3pp on historical data |
+| Rate-regime conditioning | Future | Thresholds calibrated on 2010–2024 low-rate era |
+| `google.generativeai` deprecation | Low | Migrate to the `google.genai` package |
