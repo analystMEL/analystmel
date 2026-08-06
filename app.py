@@ -86,7 +86,9 @@ FAIR_RANGES_FULL = {
         ("Rule of 40",   "rule_of_40",         25,  45,  "%", "score"),
     ],
     "hyperscale-2": [
-        ("EV/NTM Rev",   "ev_ntm_revenue",     6,   12,  "x", "multiple"),
+        # Floor lowered 6 -> 3 (v2.1): mature hyperscalers (AMZN 3.4x, IBM 3.6x)
+        # were scoring "Undervalued" against a floor calibrated for growth names.
+        ("EV/NTM Rev",   "ev_ntm_revenue",     3,   12,  "x", "multiple"),
     ],
     "hyperscale-1": [
         ("EV/NTM Rev",   "ev_ntm_arr",         6,   15,  "x", "multiple"),

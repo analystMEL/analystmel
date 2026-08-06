@@ -76,6 +76,10 @@ MANUAL_BM_OVERRIDES = {
     # textbook hyperscale infrastructure.
     "CRWV":  "hyperscale",        # was saas-1 — CoreWeave GPU cloud
     "NBIS":  "hyperscale",        # was deep_tech-1 — Nebius AI cloud
+    "NTAP":  "semi_hardware",     # was deep_tech-3 — NetApp enterprise storage
+                                  # hardware (same family as WDC/STX)
+    "U":     "saas",              # was deep_tech-2 — Unity game-engine software,
+                                  # subscription + ad monetisation, not frontier R&D
 }
 
 # Populated at runtime: tickers whose AV fundamentals come back in a non-USD
@@ -127,25 +131,28 @@ TICKERS = [
 YEARS_OF_DATA = 5
 
 # ---------------------------------------------------------------------------
-# Alpha Vantage rate-limit configuration
+# Alpha Vantage rate-limit configuration — PREMIUM (Pro) tier
 #
-# Tier switching is done entirely via the AV_CALLS_PER_MINUTE env var.
-# Set it in ~/.zshrc — no code changes needed when upgrading.
+#   Pro tier ($50/month): 75 requests/minute, NO daily cap.
 #
-#   Free tier  ($0/month):  5 req/min, 25 req/day
-#       export AV_CALLS_PER_MINUTE=5
+# The engine is now Pro-only. There is no daily-quota handling: the former
+# 25/day free-tier logic (hard-stop after N consecutive zero-record tickers
+# assumed to mean "quota exhausted") has been removed. The only rate limit
+# that exists on Pro is the per-minute burst ceiling, which is absorbed by
+# the exponential-backoff retry in _av_fetch below.
 #
-#   Pro tier   ($50/month): 75 req/min, no daily cap
-#       export AV_CALLS_PER_MINUTE=75
-#
-# AV_PRO_TIER=True disables the daily-quota hard-stop in run_universe.py
-# and enables per-minute burst-retry with exponential backoff in _av_fetch.
+# AV_CALLS_PER_MINUTE can still be overridden via env var if AV ever changes
+# the plan ceiling, but it defaults to the Pro value — no export required.
 # ---------------------------------------------------------------------------
-AV_CALLS_PER_MINUTE: int = int(os.getenv("AV_CALLS_PER_MINUTE", "5"))
-AV_SLEEP: float = 60.0 / AV_CALLS_PER_MINUTE          # seconds between calls
-AV_PRO_TIER: bool = AV_CALLS_PER_MINUTE >= 75         # True = no daily cap
+AV_CALLS_PER_MINUTE: int = int(os.getenv("AV_CALLS_PER_MINUTE", "75"))
+AV_SLEEP: float = 60.0 / AV_CALLS_PER_MINUTE           # 0.8s at 75/min
 AV_RATE_LIMIT_RETRIES: int = 3                         # max retries on per-minute throttle
 AV_RATE_LIMIT_BACKOFF: tuple = (15, 30, 60)            # seconds to wait before each retry
+
+# Why the most recent AV fetch returned nothing. Lets callers distinguish a
+# genuine throttle from a delisted/unknown symbol instead of guessing.
+# One of: None | "rate_limit" | "api_error" | "timeout" | "exception" | "empty"
+AV_LAST_FAILURE_REASON = None
 
 # ==========================================
 # LOGGING
@@ -438,6 +445,9 @@ def _av_fetch(ticker: str, function: str, _attempt: int = 0) -> Optional[dict]:
                 AV_RATE_LIMIT_RETRIES times, then return None.
                 Genuine errors (Error Message, delisted ticker) are never retried.
     """
+    global AV_LAST_FAILURE_REASON
+    if _attempt == 0:
+        AV_LAST_FAILURE_REASON = None
     url = (
         f"https://www.alphavantage.co/query"
         f"?function={function}&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
@@ -452,7 +462,9 @@ def _av_fetch(ticker: str, function: str, _attempt: int = 0) -> Optional[dict]:
         # Rate-limit / info messages ("Information" or "Note" keys).
         rate_msg = data.get("Information") or data.get("Note")
         if rate_msg:
-            if AV_PRO_TIER and _attempt < AV_RATE_LIMIT_RETRIES:
+            # Pro tier: the only limit is the per-minute burst ceiling.
+            # Always absorb it with exponential backoff before giving up.
+            if _attempt < AV_RATE_LIMIT_RETRIES:
                 wait = AV_RATE_LIMIT_BACKOFF[_attempt]
                 log.warning(
                     f"[{ticker}] AV per-minute limit hit "
@@ -461,18 +473,22 @@ def _av_fetch(ticker: str, function: str, _attempt: int = 0) -> Optional[dict]:
                 )
                 time.sleep(wait)
                 return _av_fetch(ticker, function, _attempt + 1)
-            # Free tier or retries exhausted — surface to caller.
-            log.warning(f"[{ticker}] AV rate limit / info message: {rate_msg[:120]}")
+            # Retries exhausted — surface to caller.
+            AV_LAST_FAILURE_REASON = "rate_limit"
+            log.warning(f"[{ticker}] AV rate limit persisted after "
+                        f"{AV_RATE_LIMIT_RETRIES} retries: {rate_msg[:120]}")
             return None
 
         # Hard errors: bad symbol, invalid function, etc. Never retry.
         if "Error Message" in data:
+            AV_LAST_FAILURE_REASON = "api_error"
             log.warning(f"[{ticker}] AV error: {data['Error Message']}")
             return None
 
         return data
 
     except requests.exceptions.Timeout:
+        AV_LAST_FAILURE_REASON = "timeout"
         log.error(f"[{ticker}] AV request timed out for {function}")
         return None
     except Exception as e:
@@ -495,6 +511,8 @@ def fetch_and_store_fundamentals(
 
     reports = data.get("quarterlyReports", [])
     if not reports:
+        global AV_LAST_FAILURE_REASON
+        AV_LAST_FAILURE_REASON = "empty"
         log.warning(f"[{ticker}] No quarterly reports found for {statement_type}.")
         return 0
 

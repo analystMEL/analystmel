@@ -1,11 +1,10 @@
-"""Durable, resumable universe classifier — tuned for Alpha Vantage Pro.
+"""Durable, resumable universe classifier — Alpha Vantage Pro.
 
-Tier is driven entirely by AV_CALLS_PER_MINUTE (read in data_pipeline1):
-  Free ($0):  export AV_CALLS_PER_MINUTE=5   -> 12s between calls, 25/day cap,
-              stops after 3 consecutive zero-record tickers (quota exhausted).
-  Pro ($50):  export AV_CALLS_PER_MINUTE=75  -> 0.8s between calls, no daily cap,
-              stops only after 5 consecutive STRUCTURAL failures (bad symbol /
-              network), because rate-limit bursts are retried inside _av_fetch.
+Runs at the Pro ceiling: 75 requests/minute (0.8s between calls), NO daily cap.
+There is no daily-quota handling — the former free-tier 25/day logic is gone.
+The run stops only after 5 consecutive STRUCTURAL failures (bad symbol, dead
+key, network down); per-minute burst limits are absorbed by the exponential-
+backoff retry inside _av_fetch and never reach the failure counter.
 
 Behaviour:
   - Skips tickers that already have all 3 statements cached AND a classification
@@ -47,15 +46,18 @@ from data_pipeline1 import (
     TICKERS, DB_NAME, setup_database,
     fetch_and_store_price_data, fetch_and_store_fundamentals,
     compute_and_store_metrics, run_classification,
-    AV_SLEEP, AV_PRO_TIER, AV_CALLS_PER_MINUTE, EXCLUDED_TICKERS_NON_USD,
+    AV_SLEEP, AV_CALLS_PER_MINUTE, EXCLUDED_TICKERS_NON_USD,
     STAGE_CHANGES_THIS_RUN,
 )
+import data_pipeline1 as _dp   # AV_LAST_FAILURE_REASON is module-level state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("run_universe")
 
 STATEMENTS = ["INCOME_STATEMENT", "CASH_FLOW", "BALANCE_SHEET"]
-CONSEC_FAIL_LIMIT = 5 if AV_PRO_TIER else 3
+# Structural-failure stop only (dead key / bad symbols / network).
+# Per-minute throttling is handled by _av_fetch retries, never counted here.
+CONSEC_FAIL_LIMIT = 5
 
 
 def parse_args(argv):
@@ -73,8 +75,7 @@ def main():
     setup_database(conn)
 
     already = {r[0] for r in conn.execute("SELECT ticker FROM classifications")}
-    tier = f"PRO ({AV_CALLS_PER_MINUTE}/min, no daily cap)" if AV_PRO_TIER else \
-           f"FREE ({AV_CALLS_PER_MINUTE}/min, 25/day cap)"
+    tier = f"PRO ({AV_CALLS_PER_MINUTE}/min, no daily cap)"
     todo = [t for t in tickers if t not in already]
     log.info(f"AV tier: {tier}  |  sleep={AV_SLEEP:.2f}s  |  stop after {CONSEC_FAIL_LIMIT} consecutive failures")
     log.info(f"{len(tickers)} requested, {len(tickers)-len(todo)} already classified, {len(todo)} to process.")
@@ -84,7 +85,7 @@ def main():
         log.info(f"[{i}/{len(todo)}] {t}")
         fetch_and_store_price_data(conn, t)
 
-        got, rate_limited = 0, False
+        got, fail_reasons = 0, set()
         for stmt in STATEMENTS:
             have = conn.execute(
                 "SELECT COUNT(*) FROM fundamentals WHERE ticker=? AND statement_type=?",
@@ -94,19 +95,26 @@ def main():
                 continue
             n = fetch_and_store_fundamentals(conn, t, stmt)
             av_calls += 1
-            if n == 0:
-                rate_limited = True
+            if n == 0 and _dp.AV_LAST_FAILURE_REASON:
+                fail_reasons.add(_dp.AV_LAST_FAILURE_REASON)
             got += n
             time.sleep(AV_SLEEP)
 
         if got == 0:
             consec += 1
-            reason = "rate-limit/quota" if rate_limited else "no data (delisted/bad symbol?)"
+            if "rate_limit" in fail_reasons:
+                reason = "rate limit persisted through retries"
+            elif "api_error" in fail_reasons:
+                reason = "AV rejected the request (bad symbol/function)"
+            elif "timeout" in fail_reasons or "exception" in fail_reasons:
+                reason = "network error"
+            else:
+                reason = "no data returned (delisted / not covered)"
             log.warning(f"  {t}: 0 records ({reason})  [{consec}/{CONSEC_FAIL_LIMIT}]")
             results.append((t, "FAIL", reason))
             if consec >= CONSEC_FAIL_LIMIT:
                 log.error(f"STOPPING: {CONSEC_FAIL_LIMIT} consecutive failures "
-                          f"({'quota exhausted' if not AV_PRO_TIER else 'structural — check key/network'}).")
+                          f"(structural — check API key / symbols / network).")
                 break
             continue
         consec = 0
