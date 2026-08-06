@@ -1534,15 +1534,23 @@ def _safe_div(numerator, denominator, rnd=2):
 
 
 # The 5×4 matrix: maps (bm_category, fh_stage) → valuation method label
+# Matrix version — written into every valuation row (valuation_json) so
+# backtest results are traceable to the matrix that produced them.
+# v2-2026-08 changes vs v1: hyperscale-2 → EV/NTM Rev (CapEx EV/EBIT + P/S
+# removed at S2); deep_tech-1 → EV/NTM Rev (renamed from P/S) with EV/Cash
+# pre-revenue fallback; consumer_internet-4 P/E primary; S4 FCF-yield ranges
+# retuned; semi_hardware-3 R40 dropped from fair ranges; PEG value-trap flag.
+MATRIX_VERSION = "v2-2026-08"
+
 VALUATION_MATRIX = {
     ("saas", 1):             "EV/NTM Revenue",
     ("saas", 2):             "EV/NTM ARR",
     ("saas", 3):             "EV/FCF and PEG",
-    ("saas", 4):             "FCF yield and P/E and PEG",
+    ("saas", 4):             "FCF yield and EV/FCF and P/E and PEG",
     ("hyperscale", 1):       "EV/Revenue and CapEx/TTM Revenue",
-    ("hyperscale", 2):       "P/S and EV/(EBIT-CapEx)",
+    ("hyperscale", 2):       "EV/NTM Revenue",
     ("hyperscale", 3):       "CapEx-adjusted EV/EBIT and PEG",
-    ("hyperscale", 4):       "P/E and PEG",
+    ("hyperscale", 4):       "FCF yield and PEG",
     ("semi_hardware", 1):    "EV/Revenue and CapEx/TTM Revenue",
     ("semi_hardware", 2):    "EV/NTM Revenue",
     ("semi_hardware", 3):    "Cycle-adjusted P/E",
@@ -1550,11 +1558,11 @@ VALUATION_MATRIX = {
     ("consumer_internet", 1): "P/S and MAU",
     ("consumer_internet", 2): "EV/NTM Revenue",
     ("consumer_internet", 3): "EV/EBITDA and PEG",
-    ("consumer_internet", 4): "P/E and PEG",
-    ("deep_tech", 1):        "P/S and TCV",
+    ("consumer_internet", 4): "P/E and EV/EBITDA and PEG",
+    ("deep_tech", 1):        "EV/NTM Revenue",
     ("deep_tech", 2):        "EV/NTM Revenue",
     ("deep_tech", 3):        "EV/Gross Profit",
-    ("deep_tech", 4):        "EV/EBITDA and PEG",
+    ("deep_tech", 4):        "FCF yield and PEG",
 }
 
 
@@ -1663,6 +1671,16 @@ def compute_valuation(conn: sqlite3.Connection, ticker: str, matrix_cell: str) -
 
     # Build valuation summary for this cell
     cell_multiples = {}
+
+    # deep_tech-1 pre-revenue fallback: EV/NTM Rev divides by (near-)zero for
+    # pre-revenue names. Switch to EV/Cash + cash runway as the primary signal.
+    # Metric label written as "EV/Cash" so verdict/source lookups key correctly.
+    if method_key == ("deep_tech", 1) and (rev is None or rev <= 0):
+        primary_method = "EV/Cash and Cash Runway"
+        ev_to_cash = _safe_div(ev, m.get("cash_and_equiv")) if m.get("cash_and_equiv") else None
+        cell_multiples["ev_to_cash"] = ev_to_cash
+        cell_multiples["metric_label"] = "EV/Cash"
+        cell_multiples["cash_runway_months"] = m.get("cash_runway_months")
     if "EV/NTM Revenue" in primary_method:
         cell_multiples["ev_ntm_revenue"] = ev_ntm_revenue
     if "EV/NTM ARR" in primary_method:
@@ -1707,6 +1725,36 @@ def compute_valuation(conn: sqlite3.Connection, ticker: str, matrix_cell: str) -
 
     # Always include Rule of 40 as a reference
     cell_multiples["rule_of_40"] = rule_of_40
+
+    # Matrix version stamp — every valuation row is traceable to the matrix
+    # revision that produced it (backtest reproducibility).
+    cell_multiples["matrix_version"] = MATRIX_VERSION
+
+    # ---- PEG value-trap flag --------------------------------------------
+    # Where PEG is a cell metric: a low PEG (<0.8) combined with DECELERATING
+    # revenue growth (current-quarter LTM YoY below the prior quarter's) often
+    # signals a value trap, not undervaluation. Mirrors the RPO persistence
+    # idea: direction matters, not the level alone. The PEG value itself is
+    # never suppressed — both are surfaced.
+    if "PEG" in primary_method and peg_ratio is not None and peg_ratio < 0.8:
+        try:
+            _inc = _load_quarterly_series(conn, ticker, "INCOME_STATEMENT")
+            if len(_inc) >= 9:
+                _ltm_now    = sum(_safe_float(q.get("totalRevenue")) for q in _inc[0:4])
+                _ltm_prior  = sum(_safe_float(q.get("totalRevenue")) for q in _inc[4:8])
+                _ltm_now_q1   = sum(_safe_float(q.get("totalRevenue")) for q in _inc[1:5])
+                _ltm_prior_q1 = sum(_safe_float(q.get("totalRevenue")) for q in _inc[5:9])
+                if _ltm_prior > 0 and _ltm_prior_q1 > 0:
+                    _g_now  = (_ltm_now / _ltm_prior - 1) * 100
+                    _g_prev = (_ltm_now_q1 / _ltm_prior_q1 - 1) * 100
+                    if _g_now < _g_prev:
+                        cell_multiples["FLAG_peg_value_trap"] = (
+                            "Low PEG with decelerating growth — may indicate a "
+                            "value trap rather than undervaluation.")
+                        log.info(f"[{ticker}] FLAG_peg_value_trap "
+                                 f"(PEG={peg_ratio}, growth {_g_prev:.1f}% → {_g_now:.1f}%)")
+        except Exception as e:
+            log.warning(f"[{ticker}] PEG value-trap check failed: {e}")
 
     # ---- RPO directional qualifier --------------------------------------
     # Apply ONLY to hyperscale S2/S3 (primary qualifier) and saas S2/S3

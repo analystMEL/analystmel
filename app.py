@@ -76,7 +76,7 @@ def render_dark_table(headers, rows, highlight_first_col=None):
 # ---------------------------------------------------------------------------
 FAIR_RANGES_FULL = {
     "hyperscale-4": [
-        ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
+        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
         ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
         ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
     ],
@@ -86,15 +86,14 @@ FAIR_RANGES_FULL = {
         ("Rule of 40",   "rule_of_40",         25,  45,  "%", "score"),
     ],
     "hyperscale-2": [
-        ("CapEx EV/EBIT","capex_adj_ev_ebit",  40,  80,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
+        ("EV/NTM Rev",   "ev_ntm_revenue",     6,   12,  "x", "multiple"),
     ],
     "hyperscale-1": [
         ("EV/NTM Rev",   "ev_ntm_arr",         6,   15,  "x", "multiple"),
         ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
     ],
     "saas-4": [
-        ("FCF Yield",    "fcf_yield",          1.0, 2.5, "%", "yield"),
+        ("FCF Yield",    "fcf_yield",          2.0, 3.5, "%", "yield"),
         ("EV/FCF",       "ev_fcf",             20,  35,  "x", "multiple"),
         ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
         ("Rule of 40",   "rule_of_40",         40,  60,  "%", "score"),
@@ -113,13 +112,12 @@ FAIR_RANGES_FULL = {
         ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
     ],
     "semi_hardware-4": [
-        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
+        ("FCF Yield",    "fcf_yield",          2.5, 4.5, "%", "yield"),
         ("PEG",          "peg_ratio",          0.5, 1.2, "x", "multiple"),
     ],
     "semi_hardware-3": [
         ("Cycle P/E",    "cycle_adj_pe",       20,  35,  "x", "multiple"),
         ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         25,  50,  "%", "score"),
     ],
     "semi_hardware-2": [
         ("EV/NTM Rev",   "ev_ntm_arr",         1.5, 4.0, "x", "multiple"),
@@ -128,6 +126,7 @@ FAIR_RANGES_FULL = {
         ("EV/NTM Rev",   "ev_ntm_arr",         0.5, 2.0, "x", "multiple"),
     ],
     "consumer_internet-4": [
+        ("P/E",          "pe_ratio",           15,  25,  "x", "multiple"),
         ("EV/EBITDA",    "ev_ebitda",          12,  18,  "x", "multiple"),
         ("PEG",          "peg_ratio",          0.8, 1.5, "x", "multiple"),
     ],
@@ -144,7 +143,8 @@ FAIR_RANGES_FULL = {
         ("EV/NTM Rev",   "ev_ntm_arr",         1,   5,   "x", "multiple"),
     ],
     "deep_tech-4": [
-        ("FCF Yield",    "fcf_yield",          1.5, 3.0, "%", "yield"),
+        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
+        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
     ],
     "deep_tech-3": [
         ("EV/GP",        "ev_gross_profit",    15,  30,  "x", "multiple"),
@@ -154,7 +154,7 @@ FAIR_RANGES_FULL = {
         ("EV/NTM Rev",   "ev_ntm_arr",         5,   12,  "x", "multiple"),
     ],
     "deep_tech-1": [
-        ("P/S",          "ps_ratio",           20,  60,  "x", "multiple"),
+        ("EV/NTM Rev",   "ev_ntm_revenue",     20,  60,  "x", "multiple"),
     ],
 }
 
@@ -212,6 +212,8 @@ def get_active_flags(conn, ticker):
             if _vj.get("rpo_qualifier") == "forward_demand_decelerating":
                 flags.append(("Forward demand decelerating",
                               "RPO growth is trailing revenue growth — forward demand may be softening."))
+            if _vj.get("FLAG_peg_value_trap"):
+                flags.append(("PEG value trap", _vj["FLAG_peg_value_trap"]))
     except Exception:
         pass
     return flags
