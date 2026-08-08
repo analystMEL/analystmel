@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import time
+import datetime
 import sqlite3
 import logging
 
@@ -58,6 +59,18 @@ STATEMENTS = ["INCOME_STATEMENT", "CASH_FLOW", "BALANCE_SHEET"]
 # Structural-failure stop only (dead key / bad symbols / network).
 # Per-minute throttling is handled by _av_fetch retries, never counted here.
 CONSEC_FAIL_LIMIT = 5
+
+# Alpha Vantage keeps serving the last filed statements for companies that have
+# been acquired or taken private — SPLK still returns a healthy OVERVIEW two
+# years after Cisco closed the deal. Classifying those produces a phantom peer
+# priced off stale financials, so gate on filing recency rather than trying to
+# curate a delisting list by hand.
+#
+# 400 days, not 200: AV's own coverage can lag a live filer by two quarters
+# (NVDA's newest cached statement is 189 days old), so a tighter gate would
+# throw away healthy companies. Genuinely dead names are far past this —
+# SPLK last filed in 2024. The gate is for corpses, not late filers.
+STALE_FILING_DAYS = 400
 
 
 def parse_args(argv):
@@ -119,6 +132,18 @@ def main():
             continue
         consec = 0
 
+        # Filing-recency gate. Not a failure — the fetch worked fine, the data
+        # is just too old to classify — so `consec` stays reset above.
+        latest = conn.execute(
+            "SELECT MAX(fiscal_date) FROM fundamentals WHERE ticker=?", (t,)
+        ).fetchone()[0]
+        if latest:
+            age_days = (datetime.date.today() - datetime.date.fromisoformat(latest[:10])).days
+            if age_days > STALE_FILING_DAYS:
+                log.warning(f"  {t}: last filing {latest} ({age_days}d old) — likely acquired/delisted, skipping")
+                results.append((t, "STALE", f"last filing {latest} ({age_days}d)"))
+                continue
+
         ok = compute_and_store_metrics(conn, t)
         if not ok:
             note = "non-USD reporting currency" if t in EXCLUDED_TICKERS_NON_USD else "metrics failed"
@@ -136,7 +161,7 @@ def main():
     print(f"SUMMARY  (AV calls this run: {av_calls})")
     print("=" * 70)
     for t, status, detail in results:
-        icon = {"OK": "✓", "EXCLUDED": "🚫", "PARTIAL": "⚠️", "FAIL": "✗"}.get(status, "?")
+        icon = {"OK": "✓", "EXCLUDED": "🚫", "PARTIAL": "⚠️", "FAIL": "✗", "STALE": "🕗"}.get(status, "?")
         print(f"  {icon}  {t:6s} {status:9s}  {detail}")
     n_total = conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
     print(f"\nUniverse total: {n_total} classified tickers")

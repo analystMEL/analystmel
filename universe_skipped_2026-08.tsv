@@ -1,0 +1,296 @@
+ticker	reason	detail
+ALGN	sector_not_technology	AV sector=HEALTHCARE
+BKNG	sector_not_technology	AV sector=CONSUMER CYCLICAL
+CAVA	sector_not_technology	AV sector=CONSUMER CYCLICAL
+CFLO	no_av_coverage	
+CL	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+CLSK	sector_not_technology	AV sector=FINANCIAL SERVICES
+CMPO	no_av_coverage	
+CONE	no_av_coverage	
+COST	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+CSGS	no_av_coverage	
+CTVA	sector_not_technology	AV sector=BASIC MATERIALS
+DLB	sector_not_technology	AV sector=INDUSTRIALS
+DLR	sector_not_technology	AV sector=REAL ESTATE
+DNUT	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+DRS	sector_not_technology	AV sector=INDUSTRIALS
+ENVX	sector_not_technology	AV sector=INDUSTRIALS
+EQIX	sector_not_technology	AV sector=REAL ESTATE
+ERJ	no_av_coverage	
+ETN	sector_not_technology	AV sector=INDUSTRIALS
+EXAS	no_av_coverage	
+EXEL	sector_not_technology	AV sector=HEALTHCARE
+EXPI	no_av_coverage	
+FARO	no_av_coverage	
+FLNC	sector_not_technology	AV sector=UTILITIES
+FNG	etf	
+FNV	sector_not_technology	AV sector=BASIC MATERIALS
+FORR	sector_not_technology	AV sector=INDUSTRIALS
+FUBO	sector_not_technology	AV sector=COMMUNICATION SERVICES
+FWRG	sector_not_technology	AV sector=CONSUMER CYCLICAL
+GILD	sector_not_technology	AV sector=HEALTHCARE
+GLBE	sector_not_technology	AV sector=CONSUMER CYCLICAL
+GOOG	duplicate_share_class	same issuer as GOOGL (already classified)
+GPN	sector_not_technology	AV sector=INDUSTRIALS
+GSHD	sector_not_technology	AV sector=FINANCIAL SERVICES
+GTES	sector_not_technology	AV sector=INDUSTRIALS
+HCP	no_av_coverage	
+HWM	sector_not_technology	AV sector=INDUSTRIALS
+IAC	no_av_coverage	
+ICLR	sector_not_technology	AV sector=HEALTHCARE
+IFF	sector_not_technology	AV sector=BASIC MATERIALS
+IHS	sector_not_technology	AV sector=REAL ESTATE
+IIN	no_av_coverage	
+ILMN	sector_not_technology	AV sector=HEALTHCARE
+IP	sector_not_technology	AV sector=CONSUMER CYCLICAL
+IPAR	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+IRDM	sector_not_technology	AV sector=COMMUNICATION SERVICES
+IREN	sector_not_technology	AV sector=FINANCIAL SERVICES
+IVZ	sector_not_technology	AV sector=FINANCIAL SERVICES
+IWM	etf	
+JNPR	no_av_coverage	
+JOAN	no_av_coverage	
+KHC	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+LBRT	sector_not_technology	AV sector=ENERGY
+LEA	sector_not_technology	AV sector=CONSUMER CYCLICAL
+LEN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+LGIH	sector_not_technology	AV sector=CONSUMER CYCLICAL
+LMT	sector_not_technology	AV sector=INDUSTRIALS
+LOPE	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+LPLA	sector_not_technology	AV sector=FINANCIAL SERVICES
+LUMN	sector_not_technology	AV sector=COMMUNICATION SERVICES
+LVS	sector_not_technology	AV sector=CONSUMER CYCLICAL
+MBI	sector_not_technology	AV sector=FINANCIAL SERVICES
+MDT	sector_not_technology	AV sector=HEALTHCARE
+MGNI	sector_not_technology	AV sector=COMMUNICATION SERVICES
+MLKN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+MMC	no_av_coverage	
+MNST	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+MOH	sector_not_technology	AV sector=HEALTHCARE
+MORN	sector_not_technology	AV sector=FINANCIAL SERVICES
+MRK	sector_not_technology	AV sector=HEALTHCARE
+MRNA	sector_not_technology	AV sector=HEALTHCARE
+MRO	no_av_coverage	
+NATI	no_av_coverage	
+NAVI	sector_not_technology	AV sector=FINANCIAL SERVICES
+NCR	no_av_coverage	successor queued
+NDSN	sector_not_technology	AV sector=INDUSTRIALS
+NLOK	no_av_coverage	
+NPAB	sector_not_technology	AV sector=FINANCIAL SERVICES
+NPCE	sector_not_technology	AV sector=HEALTHCARE
+NRIX	sector_not_technology	AV sector=HEALTHCARE
+NVT	sector_not_technology	AV sector=INDUSTRIALS
+ODFL	sector_not_technology	AV sector=INDUSTRIALS
+OLK	sector_not_technology	AV sector=HEALTHCARE
+OPEN	sector_not_technology	AV sector=REAL ESTATE
+OSTK	no_av_coverage	
+PBI	sector_not_technology	AV sector=INDUSTRIALS
+PCAR	sector_not_technology	AV sector=INDUSTRIALS
+PCH	no_av_coverage	
+PDD	sector_not_technology	AV sector=CONSUMER CYCLICAL
+PENN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+PFSI	sector_not_technology	AV sector=FINANCIAL SERVICES
+PGR	sector_not_technology	AV sector=FINANCIAL SERVICES
+PH	sector_not_technology	AV sector=INDUSTRIALS
+PKD	no_av_coverage	
+PM	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+PNR	sector_not_technology	AV sector=INDUSTRIALS
+PODD	sector_not_technology	AV sector=HEALTHCARE
+PRTA	sector_not_technology	AV sector=HEALTHCARE
+PSTG	no_av_coverage	
+PWR	sector_not_technology	AV sector=INDUSTRIALS
+RDN	sector_not_technology	AV sector=FINANCIAL SERVICES
+RDNT	sector_not_technology	AV sector=HEALTHCARE
+RDUS	sector_not_technology	AV sector=BASIC MATERIALS
+RECN	no_av_coverage	
+RHI	sector_not_technology	AV sector=INDUSTRIALS
+RHP	sector_not_technology	AV sector=REAL ESTATE
+RIG	sector_not_technology	AV sector=ENERGY
+RJF	sector_not_technology	AV sector=FINANCIAL SERVICES
+RKT	sector_not_technology	AV sector=FINANCIAL SERVICES
+RL	sector_not_technology	AV sector=CONSUMER CYCLICAL
+RLI	sector_not_technology	AV sector=FINANCIAL SERVICES
+RMD	sector_not_technology	AV sector=HEALTHCARE
+ROK	sector_not_technology	AV sector=INDUSTRIALS
+RUSHA	sector_not_technology	AV sector=CONSUMER CYCLICAL
+RVLV	sector_not_technology	AV sector=CONSUMER CYCLICAL
+RXRX	sector_not_technology	AV sector=HEALTHCARE
+SAVE	no_av_coverage	
+SBCF	sector_not_technology	AV sector=FINANCIAL SERVICES
+SBUX	sector_not_technology	AV sector=CONSUMER CYCLICAL
+SCHW	sector_not_technology	AV sector=FINANCIAL SERVICES
+SCI	sector_not_technology	AV sector=CONSUMER CYCLICAL
+SE	sector_not_technology	AV sector=CONSUMER CYCLICAL
+SEIC	sector_not_technology	AV sector=FINANCIAL SERVICES
+SEM	no_av_coverage	
+SFIX	sector_not_technology	AV sector=CONSUMER CYCLICAL
+SG	sector_not_technology	AV sector=CONSUMER CYCLICAL
+SGH	no_av_coverage	successor queued
+SGRY	sector_not_technology	AV sector=HEALTHCARE
+SKX	no_av_coverage	
+SLB	sector_not_technology	AV sector=ENERGY
+SLP	sector_not_technology	AV sector=HEALTHCARE
+SOFI	sector_not_technology	AV sector=FINANCIAL SERVICES
+SPOT	sector_not_technology	AV sector=COMMUNICATION SERVICES
+SQ	no_av_coverage	successor queued
+SRCL	no_av_coverage	
+SUN	sector_not_technology	AV sector=ENERGY
+SWI	no_av_coverage	
+SYK	sector_not_technology	AV sector=HEALTHCARE
+TDO	no_av_coverage	
+TDOC	sector_not_technology	AV sector=HEALTHCARE
+TFSL	sector_not_technology	AV sector=FINANCIAL SERVICES
+TGNA	no_av_coverage	
+TGTX	sector_not_technology	AV sector=HEALTHCARE
+TIGO	sector_not_technology	AV sector=COMMUNICATION SERVICES
+TILE	sector_not_technology	AV sector=CONSUMER CYCLICAL
+TITN	sector_not_technology	AV sector=INDUSTRIALS
+TKNO	sector_not_technology	AV sector=HEALTHCARE
+TMDX	sector_not_technology	AV sector=HEALTHCARE
+TMO	sector_not_technology	AV sector=HEALTHCARE
+TMUS	sector_not_technology	AV sector=COMMUNICATION SERVICES
+TPX	no_av_coverage	
+TROW	sector_not_technology	AV sector=FINANCIAL SERVICES
+TRU	sector_not_technology	AV sector=FINANCIAL SERVICES
+TRV	sector_not_technology	AV sector=FINANCIAL SERVICES
+TSCO	sector_not_technology	AV sector=CONSUMER CYCLICAL
+TUP	no_av_coverage	
+UDMY	no_av_coverage	
+UHS	sector_not_technology	AV sector=HEALTHCARE
+ULTA	sector_not_technology	AV sector=CONSUMER CYCLICAL
+UMPQ	no_av_coverage	
+UNA	no_av_coverage	
+UNFI	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+UNH	sector_not_technology	AV sector=HEALTHCARE
+UNIT	sector_not_technology	AV sector=REAL ESTATE
+UNVR	no_av_coverage	
+UPS	sector_not_technology	AV sector=INDUSTRIALS
+URNM	etf	
+USAC	sector_not_technology	AV sector=ENERGY
+USAP	no_av_coverage	
+USFD	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+USHY	etf	
+USM	no_av_coverage	
+USNA	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+UTZ	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+UUUU	sector_not_technology	AV sector=ENERGY
+V	sector_not_technology	AV sector=FINANCIAL SERVICES
+VAC	sector_not_technology	AV sector=CONSUMER CYCLICAL
+VALE	sector_not_technology	AV sector=BASIC MATERIALS
+VEEV	sector_not_technology	AV sector=HEALTHCARE
+VFC	sector_not_technology	AV sector=CONSUMER CYCLICAL
+VGR	no_av_coverage	
+VICI	sector_not_technology	AV sector=REAL ESTATE
+VIPS	sector_not_technology	AV sector=CONSUMER CYCLICAL
+VIRT	sector_not_technology	AV sector=FINANCIAL SERVICES
+VLCN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+VLO	sector_not_technology	AV sector=ENERGY
+VLTO	sector_not_technology	AV sector=INDUSTRIALS
+VMC	sector_not_technology	AV sector=BASIC MATERIALS
+VMI	sector_not_technology	AV sector=INDUSTRIALS
+VNOM	sector_not_technology	AV sector=ENERGY
+VOD	sector_not_technology	AV sector=COMMUNICATION SERVICES
+VOO	etf	
+VOR	sector_not_technology	AV sector=HEALTHCARE
+VOX	etf	
+VRSK	sector_not_technology	AV sector=INDUSTRIALS
+VRT	sector_not_technology	AV sector=INDUSTRIALS
+VRTX	sector_not_technology	AV sector=HEALTHCARE
+VST	sector_not_technology	AV sector=UTILITIES
+VTR	sector_not_technology	AV sector=REAL ESTATE
+VTRS	sector_not_technology	AV sector=HEALTHCARE
+VVV	sector_not_technology	AV sector=CONSUMER CYCLICAL
+VYGG	no_av_coverage	
+VZ	sector_not_technology	AV sector=COMMUNICATION SERVICES
+WAB	sector_not_technology	AV sector=INDUSTRIALS
+WAL	sector_not_technology	AV sector=FINANCIAL SERVICES
+WAT	sector_not_technology	AV sector=HEALTHCARE
+WBA	no_av_coverage	
+WBD	sector_not_technology	AV sector=COMMUNICATION SERVICES
+WBS	sector_not_technology	AV sector=FINANCIAL SERVICES
+WCC	sector_not_technology	AV sector=INDUSTRIALS
+WCN	sector_not_technology	AV sector=INDUSTRIALS
+WEC	sector_not_technology	AV sector=UTILITIES
+WEN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WERN	sector_not_technology	AV sector=INDUSTRIALS
+WES	sector_not_technology	AV sector=ENERGY
+WF	sector_not_technology	AV sector=FINANCIAL SERVICES
+WFC	sector_not_technology	AV sector=FINANCIAL SERVICES
+WGO	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WH	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WING	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WIRE	no_av_coverage	
+WKC	sector_not_technology	AV sector=ENERGY
+WKHS	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WLDN	sector_not_technology	AV sector=INDUSTRIALS
+WLTW	no_av_coverage	
+WM	sector_not_technology	AV sector=INDUSTRIALS
+WMB	sector_not_technology	AV sector=ENERGY
+WMS	sector_not_technology	AV sector=INDUSTRIALS
+WMT	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+WNC	sector_not_technology	AV sector=INDUSTRIALS
+WOOF	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WPP	sector_not_technology	AV sector=COMMUNICATION SERVICES
+WRB	sector_not_technology	AV sector=FINANCIAL SERVICES
+WRE	no_av_coverage	
+WRK	no_av_coverage	
+WRLD	sector_not_technology	AV sector=FINANCIAL SERVICES
+WSC	sector_not_technology	AV sector=INDUSTRIALS
+WSM	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WSO	sector_not_technology	AV sector=INDUSTRIALS
+WST	sector_not_technology	AV sector=HEALTHCARE
+WT	sector_not_technology	AV sector=FINANCIAL SERVICES
+WTFC	sector_not_technology	AV sector=FINANCIAL SERVICES
+WTI	sector_not_technology	AV sector=ENERGY
+WTM	sector_not_technology	AV sector=FINANCIAL SERVICES
+WTRG	sector_not_technology	AV sector=UTILITIES
+WTS	sector_not_technology	AV sector=INDUSTRIALS
+WTTR	sector_not_technology	AV sector=ENERGY
+WU	sector_not_technology	AV sector=FINANCIAL SERVICES
+WULF	sector_not_technology	AV sector=FINANCIAL SERVICES
+WVE	sector_not_technology	AV sector=HEALTHCARE
+WVVI	sector_not_technology	AV sector=CONSUMER DEFENSIVE
+WWD	sector_not_technology	AV sector=INDUSTRIALS
+WWW	sector_not_technology	AV sector=CONSUMER CYCLICAL
+WY	sector_not_technology	AV sector=REAL ESTATE
+WYNN	sector_not_technology	AV sector=CONSUMER CYCLICAL
+X	no_av_coverage	
+XEL	sector_not_technology	AV sector=UTILITIES
+XENE	sector_not_technology	AV sector=HEALTHCARE
+XHR	sector_not_technology	AV sector=REAL ESTATE
+XLB	etf	
+XLU	etf	
+XM	no_av_coverage	
+XOM	sector_not_technology	AV sector=ENERGY
+XOS	sector_not_technology	AV sector=INDUSTRIALS
+XPO	sector_not_technology	AV sector=INDUSTRIALS
+XPRO	sector_not_technology	AV sector=ENERGY
+XRAY	sector_not_technology	AV sector=HEALTHCARE
+XRX	sector_not_technology	AV sector=INDUSTRIALS
+XYL	sector_not_technology	AV sector=INDUSTRIALS
+YELP	sector_not_technology	AV sector=COMMUNICATION SERVICES
+YORW	sector_not_technology	AV sector=UTILITIES
+YUM	sector_not_technology	AV sector=CONSUMER CYCLICAL
+YY	no_av_coverage	
+YZC	no_av_coverage	
+Z	sector_not_technology	AV sector=COMMUNICATION SERVICES
+ZBH	sector_not_technology	AV sector=HEALTHCARE
+ZEN	no_av_coverage	
+ZG	duplicate_share_class	same issuer as Z
+ZI	no_av_coverage	successor queued
+ZION	sector_not_technology	AV sector=FINANCIAL SERVICES
+ZK	sector_not_technology	AV sector=CONSUMER CYCLICAL
+ZTST	sector_not_technology	AV sector=OTHER
+ANSS	stale_filings	last filing 2025-03-31 (495d)
+EVBG	stale_filings	last filing 2024-03-31 (860d)
+SPLK	stale_filings	last filing 2024-01-31 (920d)
+WKME	stale_filings	last filing 2024-06-30 (769d)
+ASML	non_usd_currency	AV reports non-USD
+IMOS	non_usd_currency	AV reports non-USD
+KSPI	non_usd_currency	AV reports non-USD
+PAGS	non_usd_currency	AV reports non-USD
+SAP	non_usd_currency	AV reports non-USD
+SRAD	non_usd_currency	AV reports non-USD
+STNE	non_usd_currency	AV reports non-USD
+TSM	non_usd_currency	AV reports non-USD
+UMC	non_usd_currency	AV reports non-USD

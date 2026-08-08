@@ -447,7 +447,7 @@ AV_RATE_LIMIT_BACKOFF = (15, 30, 60)
 
 `TICKERS` in `data_pipeline1.py` is the original **49-name seed list**, not the
 current universe. It remains the default argument for `run_universe.py` when no
-tickers are passed, but 94 tickers are now classified — the extras were added by
+tickers are passed, but 221 tickers are now classified — the extras were added by
 passing them explicitly:
 
 ```bash
@@ -480,16 +480,46 @@ TICKERS = [
 
 ## Current Classification State (as of 2026-08)
 
-**94 tickers classified.** The universe has outgrown the static `TICKERS` list —
+**221 tickers classified** (was 94; a 140-name technology batch was added on
+2026-08-08 — see below). The universe has outgrown the static `TICKERS` list —
 new names are added by passing them to `run_universe.py` directly.
 
 | Business model | Count |
 |----------------|-------|
-| `saas` | 30 |
-| `semi_hardware` | 25 |
-| `consumer_internet` | 18 |
-| `deep_tech` | 13 |
+| `saas` | 78 |
+| `semi_hardware` | 75 |
+| `consumer_internet` | 42 |
+| `deep_tech` | 18 |
 | `hyperscale` | 8 |
+
+**2026-08-08 batch — strictly technology.** 483 candidate tickers were pre-swept
+with one AV `OVERVIEW` call each; only names AV tags `Sector=TECHNOLOGY` (plus
+four verified successor symbols) were classified, because the 5-category engine
+has no "not applicable" verdict and would force-fit banks/utilities/retailers
+into a tech cell, polluting the peer-comparison tables. Skip record with reasons:
+`universe_skipped_2026-08.tsv`; accept list: `universe_batch_2026-08.txt`.
+Successor substitutions: `XYZ`←SQ, `PENG`←SGH, `GTM`←ZI, `VYX`←NCR
+(`BYON`←OSTK dropped — Beyond is retail).
+
+**Post-batch overrides (19).** The LLM tiebreaker again dumped fabless/analog
+semis into `deep_tech` and high-margin vertical SaaS into `consumer_internet`;
+all 19 were moved to their correct cell in `MANUAL_BM_OVERRIDES` (CSCO/SLAB/SYNA/
+VYX → semi_hardware; MANH/TYL/FIVN/ALKT/MQ/DOX/RBRK/NICE/PAYX/RAMP/ROP/RPD/SPSC/
+IT → saas; XYZ → consumer_internet).
+
+**Taxonomy gap — IT-services / no-clean-fit (left LOW, not forced).** Labor-based
+IT-services firms (CTSH, EPAM, GLOB, CNXC, EXLS, KD, SAIC, UIS, ACN, BR) and a
+few others (CORZ bitcoin/HPC data centre, VSAT satcom, XPER media-IP, INOD AI
+data-prep, WEX payments) have no correct home among the five categories. They
+were deliberately **not** overridden — forcing them into `saas` would corrupt the
+SaaS peer group with ~30%-margin businesses. A sixth "IT services / other"
+category is the real fix and is deferred with the hyperscale split.
+
+**Runtime exclusions from the 2026-08 batch:**
+- *Staleness gate (>400d since last filing — acquired/delisted, AV still serves
+  stale statements):* ANSS (Synopsys, 2025), EVBG, SPLK (Cisco, 2024), WKME.
+- *Non-USD reporting currency:* ASML, IMOS, KSPI, PAGS, SAP, SRAD, STNE, TSM, UMC.
+- *No AV coverage (53) / ETFs (8):* full list in the skip TSV.
 
 **Non-USD exclusions** (yfinance `financialCurrency` gate): TSM (TWD),
 ASML (EUR), SPOT (EUR), BABA (CNY). Price data stored, metrics skipped.
@@ -497,9 +527,14 @@ ASML (EUR), SPOT (EUR), BABA (CNY). Price data stored, metrics skipped.
 **Known dead symbols** (AV + yfinance both return nothing — do not re-add):
 JNPR (acquired by HPE), ZI (reticked to GTM), PSTG, CFLT (taken private 2026).
 
-**Empty matrix cells** — no ticker currently occupies hyperscale-4, saas-1,
-semi_hardware-1 or deep_tech-4, so those fair ranges are untested against real
-data. Worth populating before the backtest is treated as complete.
+**Empty matrix cells** — no ticker occupies hyperscale-4, saas-1, or deep_tech-4;
+`semi_hardware-1` now has one (was empty). Those fair ranges remain untested
+against real data — worth populating before the backtest is treated as complete.
+
+**Interpreter note:** `/usr/bin/python3` is the only interpreter with the full
+dependency set (yfinance + google.generativeai + supabase). Plain `python3`
+resolves to 3.14 and lacks yfinance; the batch runner must be invoked as
+`/usr/bin/python3 run_universe.py …`.
 
 **Data-quality watch items:**
 - MRVL cycle P/E = 3061x, inflated by `net_income_quality_flag` (NI includes a

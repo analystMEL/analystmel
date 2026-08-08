@@ -80,6 +80,34 @@ MANUAL_BM_OVERRIDES = {
                                   # hardware (same family as WDC/STX)
     "U":     "saas",              # was deep_tech-2 — Unity game-engine software,
                                   # subscription + ad monetisation, not frontier R&D
+    # ── 2026-08 batch review (140-ticker technology expansion) ─────────────
+    # Same failure modes as above: the LLM tiebreaker dumped (a) fabless/analog
+    # semiconductor makers into deep_tech, and (b) high-margin vertical-SaaS
+    # names into consumer_internet. Several had the correct category already in
+    # their contender set. Overridden per the LOW-confidence policy.
+    # Semiconductors / networking hardware wrongly tagged deep_tech:
+    "CSCO":  "semi_hardware",     # Cisco — networking hardware (like NTAP/STX)
+    "SLAB":  "semi_hardware",     # Silicon Labs — fabless semis (contender had it)
+    "SYNA":  "semi_hardware",     # Synaptics — fabless semis (contender had it)
+    "VYX":   "semi_hardware",     # NCR Voyix — commerce hardware + software (GM 25%)
+    # Enterprise / vertical SaaS wrongly tagged deep_tech:
+    "MANH":  "saas",              # Manhattan Associates — supply-chain SaaS
+    "TYL":   "saas",              # Tyler Technologies — government SaaS
+    "FIVN":  "saas",              # Five9 — cloud contact-center SaaS
+    "ALKT":  "saas",              # Alkami — digital-banking SaaS
+    "MQ":    "saas",              # Marqeta — card-issuing API platform (B2B)
+    "DOX":   "saas",              # Amdocs — telecom BSS/OSS software
+    "RBRK":  "saas",              # Rubrik — data-security SaaS (contender had saas)
+    # Subscription software wrongly tagged consumer_internet (B2C):
+    "NICE":  "saas",              # NICE — enterprise CX software (contender had saas)
+    "PAYX":  "saas",              # Paychex — payroll software subscription
+    "RAMP":  "saas",              # LiveRamp — data-connectivity SaaS
+    "ROP":   "saas",              # Roper — vertical-software conglomerate (contender)
+    "RPD":   "saas",              # Rapid7 — cybersecurity SaaS (contender had saas)
+    "SPSC":  "saas",              # SPS Commerce — supply-chain SaaS (contender had saas)
+    "IT":    "saas",              # Gartner — subscription research (contender had saas)
+    # Consumer fintech platform wrongly tagged deep_tech:
+    "XYZ":   "consumer_internet", # Block — Square + Cash App consumer/merchant fintech
 }
 
 # Populated at runtime: tickers whose AV fundamentals come back in a non-USD
