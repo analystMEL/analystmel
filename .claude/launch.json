@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cve-app",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["-m", "streamlit", "run", "app.py", "--server.headless", "true", "--server.port", "8520"],
+      "port": 8520
+    }
+  ]
+}

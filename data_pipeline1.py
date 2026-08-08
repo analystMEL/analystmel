@@ -400,6 +400,15 @@ def setup_database(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_val_ticker        ON valuations (ticker, as_of_date)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_fhh_ticker_date   ON fh_stage_history (ticker, as_of_date DESC)")
 
+    # Point-in-time filing date (AV EARNINGS `reportedDate`). Additive column —
+    # existing rows keep NULL until backfill_fundamentals.py populates them, and
+    # nothing in the live pipeline SELECTs it, so this is backward-compatible.
+    # Enables the backtester to filter on the true report date instead of a flat
+    # 45-day fiscal-end lag (look-ahead-bias fix).
+    _fund_cols = {r[1] for r in cursor.execute("PRAGMA table_info(fundamentals)")}
+    if "reported_date" not in _fund_cols:
+        cursor.execute("ALTER TABLE fundamentals ADD COLUMN reported_date TEXT")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_reported ON fundamentals (ticker, statement_type, reported_date)")
 
     conn.commit()
     log.info("Database schema initialised.")
@@ -780,7 +789,13 @@ def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
 
     # --- Valuation inputs ---
     # D&A from cash flow statement
-    da_ltm = _ltm_sum(cf, "depreciationAmortization") or _ltm_sum(cf, "depreciation")
+    # AV's cash-flow D&A field is `depreciationDepletionAndAmortization`; the
+    # older names below are AV fallbacks/legacy and almost always absent. Using
+    # only the wrong name silently zeroed D&A → EBITDA collapsed to operating
+    # income and every EV/EBITDA cell was understated.
+    da_ltm = (_ltm_sum(cf, "depreciationDepletionAndAmortization")
+              or _ltm_sum(cf, "depreciationAmortization")
+              or _ltm_sum(cf, "depreciation"))
     ebitda_ltm = (op_income_ltm or 0) + (da_ltm or 0) if op_income_ltm is not None else None
 
     # Prior year net income (quarters 5-8) for PEG calculation

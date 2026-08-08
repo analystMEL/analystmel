@@ -480,7 +480,7 @@ TICKERS = [
 
 ## Current Classification State (as of 2026-08)
 
-**221 tickers classified** (was 94; a 140-name technology batch was added on
+**222 tickers classified** (was 94; a 140-name technology batch was added on
 2026-08-08 — see below). The universe has outgrown the static `TICKERS` list —
 new names are added by passing them to `run_universe.py` directly.
 
