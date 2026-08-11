@@ -1770,6 +1770,7 @@ def main_dashboard():
     PAGES = [
         "Home",
         "Analysis",
+        "Backtest",
         "Watchlist",
         "About",
         "Other",
@@ -1806,8 +1807,10 @@ def main_dashboard():
     )
 
     if _logged_in:
-        # Nav row: 5 page buttons + bookmark badge + logout on the right
-        _nav_cols = st.columns([1, 1, 1, 1, 1, 0.7, 0.7])
+        # Nav row: one button per page + bookmark badge + logout on the right.
+        # Sized off len(PAGES) — a hardcoded width silently collided with the
+        # badge column when the Backtest page was added.
+        _nav_cols = st.columns([1] * len(PAGES) + [0.7, 0.7])
         for _i, _p in enumerate(PAGES):
             with _nav_cols[_i]:
                 _is_active = _p == st.session_state.active_page
@@ -1820,14 +1823,14 @@ def main_dashboard():
                 ):
                     st.session_state.active_page = _p
                     st.rerun()
-        with _nav_cols[5]:
+        with _nav_cols[len(PAGES)]:
             # Bookmark button with watchlist count badge → Watchlist page
             if st.button(f"🔖 {_wl_count}", key="nav_bookmark_badge",
                          use_container_width=True,
                          help="Your watchlist"):
                 st.session_state.active_page = "Watchlist"
                 st.rerun()
-        with _nav_cols[6]:
+        with _nav_cols[len(PAGES) + 1]:
             if st.button("Logout", key="nav_logout", use_container_width=True):
                 _sb_sign_out()
                 for _k in ("user", "auth_mode", "_watchlist_cache", "stock_data"):
@@ -2057,6 +2060,11 @@ Private investors who want to understand a stock rather than simply be told what
     # --- HOME PAGE (landing — Supabase watchlist + SQLite classifications) ---
     if page == "Home":
         render_home_page(st.session_state.get("user", {}))
+
+    # --- BACKTEST PAGE (read-only; displays stored portfolio_sim.py results) ---
+    if page == "Backtest":
+        from backtest_page import render_backtest_page
+        render_backtest_page(get_db_connection(), render_dark_table)
 
     # --- WATCHLIST PAGE ---
     if page == "Watchlist":

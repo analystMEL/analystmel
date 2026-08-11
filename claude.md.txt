@@ -1,25 +1,78 @@
 # Valoura — Context-Specific Tech Stock Valuation Engine
 
-> ## SESSION HANDOFF — state as of 2026-08-11
+> ## SESSION HANDOFF — state as of 2026-08-11 (Backtest #1 COMPLETE, steps 1–7)
 >
-> **Where things stand:** the engine classifies **222 tickers**. A separate
-> **backtest universe** of 11,009 candidates now exists (`universe` table),
-> with **502 flagged `in_backtest`** (488 active + 14 human-reviewed delisted).
-> Fundamentals have been backfilled to full history **with true filing dates**,
-> and prices reach back to 1962. The backtest has *not* been re-run since.
+> **Where things stand:** the engine classifies **457 tickers**. A separate
+> **backtest universe** of 11,009 candidates exists (`universe` table), with
+> **502 flagged `in_backtest`** (488 active + 14 human-reviewed delisted).
+> **All seven steps of `~/Downloads/CVE_Backtest_01_Plan.md` are done.**
+>
+> **THE HEADLINE: the engine passes Test 1 and fails everything else.**
+> Pass conditions: **#1 PASS** (10 of 11 cells, undervalued beats overvalued on
+> median), **#2 FAIL** (the portfolio loses to QQQ and to its own equal-weight
+> universe at 5, 10 and 20 positions), **#3 partial** (holds in 2 of 3 regimes
+> on the panel, 1 of 3 in the portfolio), **#4 PASS on the panel** (signal in 10
+> cells) but fails in the portfolio (only 5 of 20 cells ever fire). Test 2 —
+> billed as the framework's strongest claim — is a **clean negative**.
+>
+> Read that as: the *verdict* carries modest real signal on the full panel; the
+> *portfolio rules built on it* destroy that signal through turnover, selection
+> and concentration. The honest next move is to fix the rules, not to re-run.
+>
+> **A data defect was found and fixed mid-session** — stock splits corrupted
+> stored price history (KLAC 10x, CRWD 4x). One reported finding was wrong
+> because of it and has been corrected in place. See *Price integrity defect*.
+> `price_integrity_check.py` should be run after every backfill from now on.
+>
+> Steps 1–2 detail:
+>
+> - **Part A verification: all three checks PASS.** A1 depth — NVDA/MSFT/INTC
+>   hold 81 statement quarters (2006→) + 109–122 EARNINGS quarters, so the
+>   2012 start needs no shortening. A2 delisted availability — AV returned full
+>   statements *and* adjusted prices for every probed delisted name including
+>   LN (delisted 2020), better than the 99%-empty probe history predicted; the
+>   D3 survivorship bound is therefore a disclosure, not a fallback. A3 filing
+>   dates — 92% of statement rows carry a true `reported_date`, EARNINGS 100%,
+>   uniform 87–92% per year across the window.
+> - **Backfill complete for all 502 `in_backtest` names.** `fundamentals`
+>   55,759 → **113,763 rows** (107,303 with a filing date); `price_data` **503
+>   tickers, 2.21M bars, 1962→2026**. 410 OK, 2 partial, **zero failures**,
+>   1,662 AV calls. SPY added (1993→) — it was missing entirely; QQQ 1999→.
+> - **Rule 1 IMPLEMENTED and verified** (was the blocker). Two layers: bars
+>   after `delisting_date` are dropped at ingest in
+>   `backfill_fundamentals.py::_backfill_price_history_av`, and
+>   `backtester.py::get_price_on_date` returns None past that date. DB-wide
+>   assertion returns **0** rows past any delisting date. All 14 delisted names
+>   now carry fundamentals + prices ending exactly on their last trading day.
+> - **11 names (2.2%) have data gaps** and will drop out at panel build —
+>   listed in `backtest_data_gaps.tsv`. 9 lack a statement type (mostly recent
+>   micro-cap IPOs); ANSS and OZON have full statements but no price series
+>   (ANSS acquired by Synopsys; OZON has no yfinance coverage).
+>
+> **Standing decision — panel BM axis = static current classification.** Each
+> ticker keeps its present-day engine BM across all historical quarters;
+> `fh_stage` is recomputed point-in-time per quarter. Rationale: the LLM
+> tiebreaker is non-deterministic and too costly per stock-quarter, and
+> re-running only the rule validators would diverge from the engine actually
+> being tested. The mild hindsight bias **must be disclosed** in the Part E
+> Limitations panel.
 >
 > **Read these three first:**
 > 1. *AV Data Defects* (below) — nine ways Alpha Vantage returns plausible-looking
 >    wrong data. Non-optional before touching AV.
-> 2. `BACKTEST_RULES.md` — Rule 1 (hard-stop at true last trading day) is
->    **specified but NOT yet implemented in `backtester.py`**. It is a blocker.
-> 3. *Known Open Items* (bottom) — ordered by priority.
+> 2. `BACKTEST_RULES.md` — Rule 1 now implemented; verification results recorded
+>    there. Open items A (ticker reuse) and B (survivorship scope) still stand.
+> 3. *Backtest #1 — Progress & Results* (below), then *Known Open Items*.
 >
-> **Immediate next steps, in order:**
-> 1. Implement Rule 1 in `backtester.py`.
-> 2. `backfill_fundamentals.py` for the 14 approved delisted tickers (they are in
->    `universe` but not yet in `classifications`).
-> 3. Classify them, then re-run the backtest.
+> **Immediate next steps (Backtest #2 — start a FRESH session):**
+> 1. **Regime-condition the fair ranges.** The single clearest finding: bands
+>    are absolute, so 75.6% of 2012 rows read undervalued vs 43.1% of 2026 rows.
+>    The engine is partly detecting the calendar, not cheapness.
+> 2. **Replace the portfolio rules.** Sell-on-falling-stage is unsupported
+>    (Test 2) and costly; the depth ranking underperforms random selection.
+>    Test: hold-until-overvalued, 10+ positions, and a within-cell rank.
+> 3. **Fix the `ev_ntm_arr` key bug** so the app and the panel agree.
+> 4. Only then re-run. Do not re-run the same rules on the same data.
 >
 > **Environment gotcha:** use **`/usr/bin/python3`** — it is the only interpreter
 > with yfinance + google.generativeai + supabase. Plain `python3` is 3.14 and
@@ -406,8 +459,8 @@ Located at: `/Users/ommelwani/gemini/antigravity/scratch/valoura_backtest.db`
 ### Tables
 | Table | Purpose |
 |-------|---------|
-| `price_data` | Daily OHLCV per ticker. Now spans **1962-01-02 → 2026-08-07**, 236 tickers (deepened by `backfill_fundamentals.py`; the live pipeline only stores 5y) |
-| `fundamentals` | Raw AV quarterly JSON per ticker/statement/fiscal_date. **55,759 rows** across 4 statement types incl. `EARNINGS`. Has a **`reported_date`** column (true filing date) — 51,920 rows populated |
+| `price_data` | Daily OHLCV per ticker, adjusted close. Spans **1962-01-02 → 2026-08-10**, **503 tickers / 2.21M bars** (deepened by `backfill_fundamentals.py`; the live pipeline only stores 5y). Includes SPY (1993→) and QQQ (1999→) benchmarks. Contains **no bars past any ticker's `delisting_date`** — Rule 1 is enforced at ingest |
+| `fundamentals` | Raw AV quarterly JSON per ticker/statement/fiscal_date. **113,763 rows** across 4 statement types incl. `EARNINGS`. Has a **`reported_date`** column (true filing date) — 107,303 rows populated (92% of statements, 100% of EARNINGS) |
 | `computed_metrics` | Derived LTM metrics + RPO columns (see below) |
 | `classifications` | BM + FH classification result per ticker/date |
 | `universe` | **Backtest universe** (11,009 rows) — see *Backtest Universe* below |
@@ -470,7 +523,10 @@ the fixed schema so the classification engine works unchanged.
 | `data_pipeline1.py` | Core engine: ingestion, metric computation, BM+FH classification, valuation matrix, RPO qualifier, stage-change detection |
 | `run_universe.py` | Durable, resumable batch runner (scratch root + repo copy — **no longer in /tmp**). Skips already-classified tickers and already-cached statements. `python3 run_universe.py [TICKERS…] [--file list.txt]` |
 | `backfill_fh_history.py` | One-time bootstrap of `fh_stage_history` (zero AV calls). **Not** the fundamentals backfill — see next row |
-| `backfill_fundamentals.py` | **Point-in-time history backfill.** Pulls FULL quarterly history (no 20-quarter cap) for INCOME_STATEMENT / BALANCE_SHEET / CASH_FLOW / EARNINGS, stamps each quarter with its true `reported_date` from EARNINGS, and deepens `price_data` to max history via yfinance. Resumable; re-runs cost ~0 calls |
+| `backfill_fundamentals.py` | **Point-in-time history backfill.** Pulls FULL quarterly history (no 20-quarter cap) for INCOME_STATEMENT / BALANCE_SHEET / CASH_FLOW / EARNINGS, stamps each quarter with its true `reported_date` from EARNINGS, and deepens `price_data` to max history. **Active names → yfinance; delisted names → AV `TIME_SERIES_DAILY_ADJUSTED`** (yfinance returns zero bars for them), with Rule 1 truncation at `delisting_date` applied at ingest and a USD guard off cached OVERVIEW. Resumable; re-runs cost ~0 calls |
+| `backtest_universe_tickers.txt` | The 502 `in_backtest = 1` tickers, generated from `universe`. Input to the backfill |
+| `backtest_data_gaps.tsv` | The 11 `in_backtest` names with incomplete statements or no price series |
+| `backfill_results.tsv` | Per-ticker status from the last backfill run (detail kept out of the console) |
 | `universe_builder.py` | Builds the `universe` table from AV `LISTING_STATUS` CSVs + an `OVERVIEW` crawl. `--build` rebuilds the table from cache with **zero API calls** |
 | `fix_delisting_dates.py` | Repairs bogus delisting dates using the frozen-price-tail detector (see *AV Data Defects*) |
 | `triage_review_list.py` | Filters delisted review candidates by statement availability, then auto-triages by name |
@@ -541,6 +597,12 @@ TICKERS = [
 ---
 
 ## Current Classification State (as of 2026-08)
+
+> **SUPERSEDED 2026-08-11 — now 457 classified.** The counts below describe the
+> 222-ticker state before the backtest expansion. Current mix: semi_hardware 152,
+> saas 128, consumer_internet 109, deep_tech 53, hyperscale 8. See
+> *Backtest #1 — Progress & Results*. The notes in this section on override
+> policy, taxonomy gaps and exclusions all still apply.
 
 **222 tickers classified** (was 94; a 140-name technology batch was added on
 2026-08-08 — see below). The universe has outgrown the static `TICKERS` list —
@@ -789,13 +851,415 @@ and does NOT retry — wrap it (see `_av_fetch_retry` in
 
 ---
 
+## Backtest #1 — Progress & Results (steps 1–4 complete, 2026-08-11)
+
+Spec: `~/Downloads/CVE_Backtest_01_Plan.md`. Steps 5–7 remain (Test 2,
+portfolio sim, Streamlit page).
+
+### Classification expansion
+222 → **457 tickers**. `run_universe.py` classified 228 of the 273 candidates;
+**38 were excluded by the B6 currency gate** (ASML/EUR, BABA·BIDU·BILI·BZ·ATHM/CNY,
+ASX/TWD, ERIC/SEK and others — the gate working as designed), the rest failed on
+thin data. BM mix now: semi_hardware 152, saas 128, consumer_internet 109,
+deep_tech 53, hyperscale 8.
+
+**`run_universe.py` cannot classify delisted names** — it calls
+`fetch_and_store_price_data` (yfinance) first, which returns zero bars for
+delisted symbols, and aborts before classifying. That silently dropped 8 of the
+14 delisted names even though their AV-backfilled prices were already in
+`price_data`. Fixed by **`classify_delisted_offline.py`**, which runs the
+engine's own `classify_business_model` / `classify_financial_health` against
+locally-computed metrics with no network price fetch. 13 of 14 delisted names
+are now classified (STEC fails — no CASH_FLOW statements, it is in
+`backtest_data_gaps.tsv`).
+- *Known divergence:* yfinance also supplies `deferred_revenue` for the SaaS
+  gate. Offline it is NULL, so the gate demotes a passing SaaS validator. With
+  the Gemini tiebreaker available the demotion resolves back to `saas`
+  (SPLK/WKME → saas-3). **The script MUST be run with the zshrc-loaded API key**
+  or the LLM is unavailable and SPLK/WKME land in `consumer_internet` instead.
+- EVBG → consumer_internet-2 and MIXT → consumer_internet-3 are the engine's own
+  tiebreaker outputs and are debatable (both look like SaaS). Left as the engine
+  produced them rather than hand-tuned. The LLM tiebreaker is non-deterministic:
+  ENFN came out `saas-2` on one run and `consumer_internet-2` on the next.
+
+### Stage 1 — `backtest_panel` (`build_panel.py`)
+**17,366 rows · 432 tickers · 2012-01-01 → 2026-07-01**, quarterly grid (59
+as-of dates). 95% carry a verdict; 15,706 have a 12-month forward return.
+Integrity assertions both return **0**: no row uses a filing dated after its
+as-of date, and no row exists at or after a ticker's delisting date. Ticker
+count grows 190 (2012) → 423 (2026) as companies IPO, which is B2 working.
+12 delisted names contribute 292 rows, 45 of them delisted-in-period.
+
+Part B compliance: B1 filing-date gate via
+`COALESCE(reported_date, fiscal_date+45d)`; B2 IPO+4q and delisting gates;
+B3 NTM proxy on 7,000 rows (all flagged `ntm_proxy_used=1`); B4 adjusted close
+throughout; B5 force-exit at last real close (Rule 1); B6 non-USD filers never
+enter `classifications`.
+
+**⚠ Panel does NOT use `app.py`'s verdict plumbing — deliberate, see next.**
+
+### Defect found: 7 of 20 cells render no verdict in the live app
+`FAIR_RANGES_FULL` (`app.py`) points every **"EV/NTM Rev"** cell at the key
+`ev_ntm_arr`, but `data_pipeline1` writes that key only when the routed method
+is `"EV/NTM ARR"`. For `semi_hardware-2` (22 tickers), `consumer_internet-2` (9)
+and `deep_tech-2` (6) the pipeline writes **`ev_ntm_revenue`**, so the lookup
+misses and `derive_verdict()` returns `None`. Separately the three **S1** cells
+(`hyperscale-1`, `semi_hardware-1`, `consumer_internet-1`) route to
+`"EV/Revenue and CapEx/TTM Revenue"` / `"P/S and MAU"`, which compute neither
+key. Verified against `valuations`: `semi_hardware-2` has 22/22 rows with
+`ev_ntm_revenue` and 0 with `ev_ntm_arr`.
+
+`build_panel.py` therefore carries its own `PANEL_MATRIX` and computes each
+cell's documented primary metric directly. Bands match the v2 matrix table above
+exactly. **This bug is still live in the app and is not yet fixed.**
+
+### Stage 2 — Test 1 results (`analyze_test1.py`)
+**The hypothesis holds, moderately, and mostly on the median.**
+
+Pooled 12m: undervalued mean +29.7% / median +15.8% / hit 67.3% (n=7,764) vs
+overvalued mean +23.3% / median +8.5% / hit 57.1% (n=3,236) → spread **+6.4pp
+mean, +7.3pp median**. Signal strengthens with horizon: the 3m spread is only
++0.2pp mean, the 6m +1.2pp.
+
+Within-cell, 11 cells clear 30 stock-quarters on both legs:
+**10 of 11 confirm on median spread; 8 of 11 on mean.**
+
+| Cell | median pp | mean pp | n(u)/n(o) |
+|---|--:|--:|---|
+| deep_tech-3 | +54.3 | −156.4 | 196/34 |
+| deep_tech-2 | +37.8 | −17.4 | 291/84 |
+| saas-2 | +32.9 | +8.2 | 982/109 |
+| consumer_internet-2 | +27.9 | +35.0 | 980/113 |
+| saas-3 | +9.9 | +6.4 | 825/638 |
+| semi_hardware-4 | +8.8 | +4.5 | 141/69 |
+| semi_hardware-2 | +6.4 | +7.9 | 1624/287 |
+| semi_hardware-3 | +5.4 | +1.7 | 983/1255 |
+| consumer_internet-3 | +4.3 | +2.8 | 1087/325 |
+| saas-4 | +1.6 | +1.9 | 264/96 |
+| hyperscale-3 | −2.1 | −1.4 | 72/76 |
+
+**Use the median.** Forward equity returns are violently right-skewed — one
+10-bagger in a 34-name leg swings the mean by hundreds of points.
+`deep_tech-3` is the clearest case: overvalued mean +183.7% with sd **790** but
+median **−41.0%**, so the mean spread reads −156pp while the median reads +54pp.
+The mean is the outlier artifact; the median is the signal.
+
+**Regime split (pass condition 3 — satisfied, 2 of 3):**
+
+| Regime | n(u)/n(o) | mean u% | mean o% | spread |
+|---|---|--:|--:|--:|
+| ZIRP 2012–2021 | 5143/1866 | 29.4 | 17.9 | **+11.5** |
+| Rate shock 2022–23 | 1083/461 | 22.5 | 2.5 | **+20.0** |
+| AI cycle 2023–26 | 1538/909 | 35.6 | 44.8 | **−9.2** |
+
+The engine is strongest when rates bite and **inverts during the AI cycle** —
+since mid-2023 "overvalued" names outran "undervalued" ones. Momentum beating
+value in a melt-up is a real finding, not a bug, and it is the single biggest
+threat to the Stage 4 portfolio result.
+
+**Verdict calibration is skewed cheap:** 8,428 undervalued vs 3,772 overvalued
+across the panel, and 75.6% of 2012 rows read undervalued vs 43.1% in 2026. The
+bands are absolute, so the decade-long multiple expansion drags the whole
+universe from "cheap" to "expensive". Regime-conditioning the ranges is the
+obvious follow-up (already an Open Item).
+
+**Pass conditions so far:** #1 met (10/11 cells, samples ≫30) · #3 met (2 of 3
+regimes) · #4 met (signal in 10 cells, not 1–2) · #2 untested until Stage 4.
+
+### Stage 3 — Test 2 results (`analyze_test2.py`) — **the claim FAILS**
+
+**The S2→S3 transition does not predict returns.** This was billed as the
+strongest single claim in the framework; the panel does not support it.
+
+1,075 S2→S3 events across 343 tickers and 58 quarters. Raw forward returns look
+healthy — **+12.2% median 12m, 62% hit rate** — but that is market beta, not
+signal. Every event is differenced against its **own quarter's** control median
+(same-cell non-transitioning peers, and the full eligible universe), because
+2021 was a good year for everything:
+
+| Measure (12m) | n | mean pp | median pp | hit% |
+|---|--:|--:|--:|--:|
+| raw return | 975 | +27.2 | +12.2 | 62.1 |
+| excess vs same-cell peers | 975 | +11.7 | **−0.6** | 49.2 |
+| excess vs universe | 975 | +13.1 | **−1.0** | 48.9 |
+
+Median excess is ~0 and the hit rate is a coin flip. As in Test 1 the mean is a
+right-skew artifact (sd 77) — believe the median.
+
+**The mirror case kills it.** S3→S2 — a *falling* stage, which Stage 4's sell
+rule fires on — produces 984 events with **+15.1% raw median and +0.3pp excess
+vs cell**. A stage fall is indistinguishable from a stage rise. If both
+directions pay the same, the variable carries no information.
+
+**Boundary oscillation is most of the event set, but filtering it does not
+rescue the claim.** `fh_stage` is a rounded weighted average, so names sitting
+on the 2/3 line flip every quarter (1,075 rises vs 984 falls is that signature).
+Filtering to *durable* (stage held the next quarter) and *first-time* (never
+reached S3 before) crossings moves the number the right way but not far enough:
+
+| Event set | n | raw med% | excess vs cell |
+|---|--:|--:|--:|
+| all 2→3 | 975 | 12.2 | −0.6 |
+| durable | 766 | 11.6 | −0.1 |
+| first-time crossing | 163 | 14.3 | +0.9 |
+| **durable AND first-time** | 131 | 13.4 | **+1.8** |
+| oscillation (neither) | 177 | 14.8 | −2.4 |
+
+The cleanest possible subset — a first, sticky crossing into FCF-positive —
+earns **+1.8pp median over its cell peers at a 52.7% hit rate**. Directionally
+right, economically trivial, and 0.5% round-trip costs eat most of it.
+
+By BM: only `semi_hardware` (+0.9, n=493) and `deep_tech` (+1.3, n=47) are
+positive; `consumer_internet` (−2.8, n=246) and `saas` (−2.4, n=177) are
+negative. `hyperscale` shows +9.0 on n=12 — insufficient, ignore it. By regime
+the AI cycle is the only positive one (+3.3, n=247) — the reverse of Test 1,
+where the AI cycle was the regime that inverted.
+
+**Interaction with the verdict (this is the useful finding).** Transitions that
+happen while the name reads *undervalued* (+1.6) or *fair* (+1.8) beat cell
+peers; those reading *overvalued* (−1.7) or carrying no metric (−6.2) lose. The
+verdict is doing the work, not the transition. **Stage 4 should therefore buy on
+verdict alone and not add a transition trigger** — and the sell-on-falling-stage
+rule is not supported by evidence either, so its cost must be measured rather
+than assumed (see the sell-rule variant in Stage 4).
+
+### Stage 4 — portfolio simulation (`portfolio_sim.py`) — **pass condition 2 FAILS**
+
+£10,000 notional · 0.5%/trade · 35% cap · quarterly rebalance on the panel's
+filing-gated grid · 2012-01-01 → 2026-08-01.
+
+| Run | Final £ | CAGR% | maxDD% | Sharpe | trades |
+|---|--:|--:|--:|--:|--:|
+| **5 positions (headline)** | **77,231** | 15.0 | −38.6 | 0.69 | 190 |
+| 10 positions | 117,465 | 18.4 | −29.6 | 0.86 | 338 |
+| 20 positions | 99,290 | 17.0 | −33.5 | 0.84 | 518 |
+| SPY | 76,616 | 14.9 | | | |
+| QQQ | 139,517 | 19.8 | | | |
+| **Equal-weight CVE universe** | **239,366** | 24.5 | | | |
+
+**The strategy loses to both required benchmarks at every concentration.** It
+edges SPY (£77.2k vs £76.6k — inside noise) and is beaten by QQQ by 45% and by
+its own equal-weight universe by 69%. Buying every eligible name in the CVE
+universe and rebalancing quarterly beat picking the "undervalued" ones by 3.2x.
+
+**Concentration sensitivity (required): 10 > 20 > 5.** The answer to "is this
+concentration luck?" is the reverse of the one the plan anticipated —
+concentration *hurts*. 5 positions is the worst of the three.
+
+**The selection ranking is actively harmful.** "Buy undervalued" leaves ~140
+candidates for 5 slots, so a ranking had to be invented: depth below the cell's
+fair band, normalised by band width. Picking at *random* from the same pool
+returns a median **£143,759 over 20 seeds** — 1.9x the depth-ranked run, and the
+only configuration that edges QQQ (+3.0%). Depth-ranking loads up on
+extreme-yield S4 names, which behave like value traps. The random spread
+(£40k / £144k / £372k min/median/max) also shows luck dominates at 5 positions:
+a 9x range from seed choice alone.
+
+**The sell rules cost something, but less than first measured.** Dropping
+sell-on-falling-stage — which Test 2 showed carries no information — returns
+**£93,162 (Sharpe 0.87 vs 0.69) on 21 trades**, better than the spec rules but
+**still losing to QQQ by 33%**. It degenerates toward buy-and-hold of a handful
+of names, so treat it as evidence against the stage-fall rule rather than as a
+strategy. Turnover on the spec rules is **114%/yr**, well past the 60% level at
+which Part D says costs dominate.
+
+> **Correction (same session).** This variant was first recorded at £167,125
+> "beats QQQ +19.8%". That number was an artefact of a corrupted KLAC price
+> series (see *Price integrity defect* below) which manufactured a +10,295%
+> round trip. After the repair it is £93,162 and beats nothing. The headline
+> 5-position run was unaffected — it never held KLAC across the break.
+
+**Only 5 of 20 cells ever fire** — saas-4 (39 buys), semi_hardware-4 (33),
+consumer_internet-3 (20), hyperscale-4 (3), saas-3 (2). Pass condition 4 holds
+on the panel (Test 1, 10 cells) but not in the portfolio, because the depth
+ranking funnels everything into FCF-yield cells.
+
+**Regime:** beats QQQ only in the rate shock (+13.1pp on a flat 2.4% vs −10.7%);
+loses ZIRP by 416pp and the AI cycle by 3pp — so **pass condition 3 fails at the
+portfolio level** (1 of 3 regimes) even though it held for Test 1. Same shape as Test 1 — the engine
+is a defensive-value signal that works when rates bite.
+
+**D3 survivorship bound is VACUOUS and must not be quoted as a pass.** Forcing
+delisted holdings to −50% / −100% changes nothing because the strategy **never
+bought a delisted name** (12 delisted tickers, 292 of 17,366 panel rows, never
+top-5 on depth). The bias is unbounded by that test, not bounded by it.
+
+**Rule 1 mechanism proof (closes the open item in `BACKTEST_RULES.md`).**
+Identical D3 results are ambiguous between "the exit works and cost nothing" and
+"the exit never fired", so a run with the candidate pool **restricted to
+delisted names** forces the path: **8 forced exits fire** (LN, MIXT, WKME, PET
+@ $0.05, ETWO…), each at the last real close on the true final trading day, and
+the terminal-loss override moves the result hard — £27,967 base → £9,097 at
+−50% → £1,893 at −100%. The hard-stop reaches the portfolio loop.
+
+**Methodology notes (all disclosed in the Part E limitations panel):**
+- Execution is at the **next close after** the signal date, not the close on or
+  before it. The filing gate admits statements dated up to the rebalance date,
+  so trading on that session's close was a look-ahead; removing it cost ~4%
+  (£80.5k → £77.2k) and changed no conclusion.
+- "Ticker exits cell" is implemented as *re-evaluate in the new cell, sell only
+  if now overvalued*. Read literally the rule fires on any stage change —
+  including an upgrade — because `matrix_cell` is `bm-stage`, which would sell
+  every winner the quarter it improves.
+- Cash is deployed across the slots being filled rather than sized at
+  pv/positions, so cash drag (1.0%) measures quarters where nothing qualified
+  rather than a sizing artefact.
+- Round trips are attributed to the cell they were **bought** for; a holding's
+  live cell moves with its stage.
+- The engine's taxonomy gaps show up directly in the trade log — CME, PAYX and
+  IDCC traded as `saas`, DXC/UIS/UPBD as `consumer_internet`. These are the
+  IT-services / no-clean-fit names already flagged in *Known Open Items*.
+
+### Price integrity defect — splits corrupt stored history (FOUND AND FIXED)
+
+**Found by reading the Part E trade log**, not by a test: KLAC showed a
+**+10,295% round trip**. KLA has never returned 100x in nine years.
+
+**The defect.** `price_data` stores *back-adjusted* prices (yfinance
+`auto_adjust=True`) and writes them with `INSERT OR IGNORE`. Back-adjustment is
+anchored to the present, so **when a ticker splits, the correct adjusted price
+for every earlier date changes by the split factor**. Rows already stored are
+never revisited, so the series ends up in two pieces on different scales, joined
+wherever the next ingest happened to start:
+
+```
+KLAC 2021-05-19  close=  28.89     <- rows written post-split, correctly adjusted
+KLAC 2021-05-20  close= 297.87     <- rows written pre-split, 10x scale  (KLA split 10:1)
+KLAC 2026-05-21  close= 184.22     <- back to the correct scale
+```
+
+A uniform factor across a whole series is harmless — returns are ratios, so a
+constant cancels (CRWD was uniformly 4x for most of its history and its returns
+were fine). **Only a break *within* a series corrupts returns**, and it does so
+catastrophically: a 10:1 split reads as a +931% one-day gain.
+
+**Scope.** `price_integrity_check.py` compares every panel ticker against a
+fresh yfinance pull: **408 clean, 2 genuinely broken (KLAC 10x, CRWD 4x), 12
+last-bar noise** (2–7% on the final bar — stored close vs live quote, not
+corruption), 12 unchecked (delisted names come from AV and have no yfinance
+presence, so this test cannot see them).
+
+**Fixed.** `price_integrity_check.py --fix` re-pulls anything above a 1.10
+spread on one consistent basis, full OHLCV. Panel, Test 1, Test 2 and every
+portfolio run were rebuilt on the corrected prices.
+
+**What changed after the repair:** Test 1 conclusions unchanged (still 10 of 11
+cells confirming). Test 2 unchanged. The **5-position headline was unaffected**
+(it sold KLAC after one quarter, before the break). The **no-sell variant
+collapsed from £167,125 to £93,162** and no longer beats QQQ — that finding had
+been entirely manufactured by the bad data.
+
+**This will recur.** Every future split re-creates it for any ticker whose rows
+predate the split. `price_integrity_check.py` should run after each backfill,
+and the real fix is for the ingest path to re-write (not `INSERT OR IGNORE`)
+history when a split is detected.
+
+### Files added this session
+`build_panel.py` · `analyze_test1.py` · `classify_delisted_offline.py` ·
+`to_classify.txt` · `test1_cell_stats.csv` · `classify_backtest_universe.log` ·
+`analyze_test2.py` · `test2_transitions.csv` · `portfolio_sim.py` ·
+`price_integrity_check.py` · `Valuora_Previous_UI/backtest_page.py`
+
+---
+
+## Metrics Accuracy Rebuild (2026-08-11) — `refresh_metrics.py`
+
+All 457 classified tickers were recomputed on AV Pro data. **78 tickers had a
+market cap wrong by ≥10%**; the largest corrections were PANW $200bn→$284bn,
+PLTR $326bn→$453bn, SHOP $142bn→$199bn, ORCL $649bn→$426bn, ASTS $41bn→$20bn.
+
+### Root cause 1 — yfinance was the market-cap source (now AV-first)
+Two independent errors, both live in every EV multiple, P/E and FCF yield:
+1. **Dual-class undercount.** `yfinance.sharesOutstanding` returns only the
+   listed class: TEAM 160M vs 253M actual, WDAY 204M vs 254M, NET 320M vs 354M.
+   An understated market cap makes EV/Revenue look cheap and FCF yield look
+   high, so the engine was **systematically biased toward "undervalued" for
+   every dual-class company**.
+2. **Staleness.** The stored `market_cap` was frozen at whatever price applied
+   when the pipeline last ran — SNOW sat at $57.9bn against a live $115.1bn.
+
+`_resolve_market_cap()` now computes market cap as *latest close × AV
+`commonStockSharesOutstanding`* (counts all classes, tracks `price_data` so it
+cannot go stale), then reconciles against AV OVERVIEW's own
+`MarketCapitalization`. Agreement within 25% → use the price-consistent value;
+disagreement → trust OVERVIEW, back out implied shares, and log to
+`mcap_review.tsv`. **AV is not universally right either** — for some ADRs and
+post-reverse-split names its balance-sheet share count is wrong by orders of
+magnitude (SIMO, TDTH, XPER), which is exactly what the reconciliation catches.
+17 tickers currently land in the conflict path. yfinance survives only as a
+last-resort fallback plus the currency gate and deferred revenue.
+
+### Root cause 2 — two genuine AV statement defects (fixed)
+Validated first: AV statements match yfinance **quarter-by-quarter within 2% on
+24 of 28** sampled tickers, and 0.0% on MSFT/NVDA/AAPL/SNOW/ABNB/CRM/ADBE/INTC/
+AMD/NFLX. **AV is also fresher** — 17 of 29 sampled tickers had a completed
+quarter AV had filed and yfinance had not. (A first pass appeared to show TEAM
+36.8% off; that was a defect in the comparison — yfinance's newest column was
+empty and pandas summed the NaN as 0. AV was right.)
+
+1. **Corrupt `grossProfit`** — 7 tickers / 11 quarters. AV ships a wrong gross
+   profit in the newest quarter while revenue and COGS stay correct, in three
+   shapes: gp == revenue with non-zero COGS (**TTD: 100% GM instead of 76.9%**),
+   gp negative while revenue > COGS (**XPER: −$88M instead of +$328M LTM**), and
+   gp missing (MBGL). `revenue − COGS` reproduces yfinance exactly, so
+   `_gross_profit_ltm()` falls back to it and logs every substitution. This
+   matters disproportionately: gross margin gates the SaaS (≥65%), hyperscale
+   (≥55%) and semi_hardware (<55%) validators **and** carries 15% weight in
+   every FH stage, so one bad value can misclassify both axes.
+2. **Semi-annual filers double-counted** — EPWK and WSE file ~182-day periods,
+   so summing 4 booked **two years** of revenue as LTM. `_periods_per_year()`
+   now sizes every LTM/prior window off measured filing spacing (4 / 2 / 1).
+
+### Not a defect — do not "fix" this
+112 tickers report a different `netIncome` in INCOME_STATEMENT vs CASH_FLOW.
+That is correct accounting: the income statement reports income attributable to
+the parent, the cash flow starts from consolidated income including minority
+interests (ACN's $48.9M gap is exactly its NCI). The engine already uses the
+income statement for NI/EPS/P-E and the cash flow only for OCF, capex, SBC and
+D&A, so each is used correctly.
+
+### ⚠ Stale-row hazard (fixed, but the app is still fragile)
+`computed_metrics` and `valuations` are **current-state tables, not history**.
+Because the backfill advanced many tickers to a newer fiscal quarter, the
+refresh wrote a second row per ticker — and **every app.py query against both
+tables is a bare `WHERE ticker=?` with no `ORDER BY`**, so the UI would have
+served the *stale* row and silently undone the whole correction (83 valuation
+rows were affected). `refresh_metrics.py` now prunes both tables to the newest
+`as_of_date` per ticker. **The real fix is to add `ORDER BY as_of_date DESC
+LIMIT 1` to those queries in `app.py`** — see Known Open Items.
+
+### Residual issues
+- `mcap_review.tsv` — 17 tickers where AV's two share sources disagree >25%.
+  Worth a manual pass; several (QNT 87%, CBRS 72%, TDTH 100%) are large enough
+  that neither source is obviously right.
+- MBGL reports zero `costOfRevenue`, so its gross margin computes to 100%. AV
+  has no COGS for it; flagged rather than fabricated.
+- 4 of 28 sampled tickers diverge from yfinance on older quarters (OSS, FTV,
+  PPLI, FIS) — spinoff/divestiture restatements, where AV holds the
+  as-originally-reported basis. OSS is a **yfinance** error (it reports negative
+  revenue for 2025-12-31); AV is correct there.
+- **BM categories were deliberately NOT re-run.** No BM validator reads market
+  cap, so the fix cannot legitimately change a BM result, but the Gemini
+  tiebreaker is non-deterministic and re-running it would churn categories and
+  desync `backtest_panel`'s static BM. FH stage and all valuations were rebuilt.
+- **`backtest_panel` is unaffected** — `build_panel.py` already used AV share
+  counts, so Test 1's results stand.
+
+---
+
 ## Known Open Items
 
 | Item | Priority | Notes |
 |------|----------|-------|
 | **Hyperscale category split — DEFERRED** | Decided | Splitting `hyperscale` into *pure cloud infrastructure* (MSFT/GOOGL/AMZN/CRWV/NBIS — usage-based compute, extreme CapEx) vs *diversified mega-cap* (IBM/ORCL — mixed legacy services + cloud) was considered and **deliberately deferred until after the backtest**. The two groups have genuinely different CapEx intensity and margin structure, and an 8-ticker category spanning both is doing real work to hold them together. But re-cutting the taxonomy now would invalidate the historical backfill: `fh_stage_history`, `stage_change_log` and every stored `valuations` row are keyed to the current `matrix_cell` strings, so a split means re-running the whole backfill against a moving target. **Backtest against the frozen v2 taxonomy first, then split with a `MATRIX_VERSION` bump and one clean re-run.** |
-| **Rule 1 not yet implemented in `backtester.py`** | **Blocker** | `BACKTEST_RULES.md` Rule 1 (hard-stop each ticker at its true last trading day) is **specified but NOT coded**. Until it is, any backtest including delisted names carries them at a frozen price forever and overstates returns. Do this before the next backtest run. |
-| Delisted cohort not yet ingested | High | The 14 approved delisted tickers are in `universe` with `in_backtest=1` but are **not in `classifications`**. Sequence: `backfill_fundamentals.py` → classify → then backtest. |
+| ~~Rule 1 not implemented~~ | **DONE 2026-08-11** | Implemented at two layers (ingest truncation in `backfill_fundamentals.py`, read guard in `backtester.py::get_price_on_date`) and verified: DB-wide assertion returns 0 rows past any delisting date; SPLK ends exactly 2024-03-15 with 153 frozen bars discarded. Full results in `BACKTEST_RULES.md`. |
+| **Splits corrupt stored price history** | **High** | `price_data` is back-adjusted but written `INSERT OR IGNORE`, so a split leaves the series spliced across two scales (KLAC 10x, CRWD 4x — both repaired 2026-08-11). Detector + repair: `price_integrity_check.py [--fix]`. **Run it after every backfill.** Real fix = re-write history on split detection instead of ignoring existing rows. Delisted names (AV-sourced) cannot be checked this way. |
+| **Backtest #1 pass conditions: only #1 passes** | **High** | Portfolio loses to QQQ and to the equal-weight universe at every concentration; Test 2 is a clean negative. Fix the rules before re-running — see the handoff header. |
+| **`app.py` reads `computed_metrics` / `valuations` with no `ORDER BY`** | **High** | Every query is a bare `WHERE ticker=?`. Both tables can legitimately hold more than one row per ticker (a new fiscal quarter writes a new `as_of_date`), and SQLite will then serve whichever row it finds first — the stale one. `refresh_metrics.py` prunes as a stopgap; the fix is `ORDER BY as_of_date DESC LIMIT 1` at app.py lines 196, 202, 1370, 2883, 2941, 2947, 3236, 3839. |
+| **`ev_ntm_arr` key bug — 7 cells show no verdict in the app** | **High** | `FAIR_RANGES_FULL` keys the "EV/NTM Rev" cells on `ev_ntm_arr`, which the pipeline only writes for ARR-routed cells; the S1 cells route to methods computing neither key. Fix = point those cells at `ev_ntm_revenue` and re-route the S1 cells in `VALUATION_MATRIX`. `build_panel.py` already works around it. Details in *Backtest #1* above. |
+| **`run_universe.py` aborts on delisted tickers** | Medium | It fetches yfinance prices before classifying; yfinance serves zero bars for delisted symbols, so the ticker is skipped even when `price_data` already holds AV-backfilled prices. Worked around by `classify_delisted_offline.py`. Real fix = skip the price fetch when local prices already cover the ticker. |
+| **Verdict bands drift with the multiple cycle** | Medium | 75.6% of 2012 panel rows read "undervalued" vs 43.1% in 2026 — absolute bands vs a decade of multiple expansion. Regime-conditioning the fair ranges is the fix; see the Rate-regime item below. |
+| Data gaps in 11 `in_backtest` names | Medium | `backtest_data_gaps.tsv`: 9 missing a statement type (recent micro-cap IPOs — BRAI, BSP, BVC, CHRN, CSQR, IQMX, QNT, WSE, STEC), 2 with statements but no prices (ANSS acquired by Synopsys; OZON no yfinance coverage). They drop out naturally at panel build — `compute_point_in_time_metrics` returns None without all three statements — but should be reported as an exclusion count, not silently lost. |
 | Backtest window hardcoded to 5y | Medium | `backtester.py:206` uses `end - 365*5` although fundamentals now reach 2006 and prices 1962. Widen to use the deeper history. |
 | Supabase RLS disabled | High | RLS is off on `users`, `watchlist`, `stage_change_log` so the anon key can write. Re-enable with per-user policies before real users. |
 | yfinance commercial use | High | Must migrate to licensed price data before production |
