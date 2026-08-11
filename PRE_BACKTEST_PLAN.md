@@ -117,3 +117,62 @@ Classification logic, valuation engine, interpretation prompt, the app UI, and t
 | `backtester.py` | `get_point_in_time_fundamentals`: use real `reported_date` (Part D) |
 | `universe_skipped_2026-08.tsv` | append this list's skip reasons |
 | `run_universe.py` | (no change) reused as-is for Part A |
+
+---
+
+# Universe Build (2026-08-11) — `universe_builder.py`
+
+**Status: ✅ complete.** `universe` table built in `valoura_backtest.db`.
+
+| | |
+|---|--:|
+| Universe rows | 11,009 (6,517 active / 4,492 delisted) |
+| `in_backtest = 1` | 495 |
+| `sector_unknown = 1` | 5,244 |
+| Review List A (delisted & in_backtest) | 9 |
+| Review List B (delisted, unknown sector, tech-sounding name) | 362 → `review_list_B.tsv` |
+
+### Step 1 gate (passed)
+active 14,279 rows · delisted 9,410 rows · `ipoDate` 100% populated in both ·
+`delistingDate` 100% in delisted (0% in active, as expected). Not sparse → proceeded.
+
+### Filters applied
+- `assetType == Stock`, exchange ∈ {NASDAQ, NYSE}, delisted cut at ≥ 2012-01-01.
+- **3,680 non-operating securities excluded** (2,932 units/warrants/rights + 1,860 SPAC
+  shells). Removes only the derivative class, never the underlying: `GCTSW`/`GCTS-WS`
+  dropped, `GCTS` kept.
+
+### Bugs found and fixed
+1. **AV returns the literal string `"None"`**, not JSON null. The `or None` idiom let it
+   through as a real sector, so those tickers were neither `sector_unknown` nor tech —
+   they vanished from the review lists. ~6% of rows. Fixed with `_av_str()`.
+2. **`"BIOTECHNOLOGY"` contains `"TECHNOLOGY"`** — substring matching swept **179 biotechs**
+   into the backtest universe (25% of it). Fixed with a *leading* word-boundary match.
+   Note: a full `\b…\b` match is WRONG here — it fails on `SEMICONDUCTORS` (AV's plural
+   industry string) and would drop every chip company. `in_backtest` 704 → 495.
+
+### AV data defect: delisting dates  → `fix_delisting_dates.py`
+597 of 9,410 delisted rows (228 in-universe) were stamped with the CSV's own snapshot
+date (2026-08-07) instead of the real one — Splunk and Seagen among them.
+
+- **yfinance cannot fix this**: it returns ZERO bars for delisted symbols (verified on
+  SPLK, SGEN, ACIA, CLDR, ARUN). Yahoo purges them.
+- **AV serves them but FREEZES them**: after the last real trade the close is carried
+  forward with zero volume forever. SPLK = one distinct close for 2.4 years.
+- Detector = last bar with volume ≥ 1% of the ticker's median volume. Validated within
+  one trading day on SPLK / SGEN / ACIA / CLDR / ARUN / EVBG. **227 corrected.**
+- Stored value is the **last tradable day** (what a backtest needs); AV's CSV convention
+  is the next business day, hence a consistent 1-day offset.
+
+### ⚠ Open risks for the backtest (NOT yet addressed)
+1. **Frozen price tails fabricate returns.** Any delisted ticker priced from AV shows a
+   flat line that never ends — no delisting, no loss, no exit. A backtest holding SPLK
+   would carry it at $156.90 through 2026. This flatters results in exactly the direction
+   that defeats adding delisted names. **The backtester must hard-stop each ticker's price
+   series at its true last trading day and force an exit.**
+2. **Ticker-symbol reuse.** 32 rows resolved as "still trading" because the symbol was
+   reassigned to a different live company (`SOS` = Storage Computer Corp → SOS Ltd;
+   `BMM`, `PALX`, `RAC`, `SSM` likewise), plus stray ETFs and a `CTEST-A` test symbol.
+   Their dates were reverted to NULL and `in_backtest = 0`. **Splicing a reused symbol's
+   history would join two different companies' price series.** Any future delisted-ticker
+   work must key on more than the symbol.

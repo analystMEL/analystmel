@@ -1,5 +1,35 @@
 # Valoura — Context-Specific Tech Stock Valuation Engine
 
+> ## SESSION HANDOFF — state as of 2026-08-11
+>
+> **Where things stand:** the engine classifies **222 tickers**. A separate
+> **backtest universe** of 11,009 candidates now exists (`universe` table),
+> with **502 flagged `in_backtest`** (488 active + 14 human-reviewed delisted).
+> Fundamentals have been backfilled to full history **with true filing dates**,
+> and prices reach back to 1962. The backtest has *not* been re-run since.
+>
+> **Read these three first:**
+> 1. *AV Data Defects* (below) — nine ways Alpha Vantage returns plausible-looking
+>    wrong data. Non-optional before touching AV.
+> 2. `BACKTEST_RULES.md` — Rule 1 (hard-stop at true last trading day) is
+>    **specified but NOT yet implemented in `backtester.py`**. It is a blocker.
+> 3. *Known Open Items* (bottom) — ordered by priority.
+>
+> **Immediate next steps, in order:**
+> 1. Implement Rule 1 in `backtester.py`.
+> 2. `backfill_fundamentals.py` for the 14 approved delisted tickers (they are in
+>    `universe` but not yet in `classifications`).
+> 3. Classify them, then re-run the backtest.
+>
+> **Environment gotcha:** use **`/usr/bin/python3`** — it is the only interpreter
+> with yfinance + google.generativeai + supabase. Plain `python3` is 3.14 and
+> lacks yfinance. Credentials load from `~/.zshrc`, which does **not** propagate
+> into Bash subshells; the scripts parse it directly.
+>
+> **Working directory:** `/Users/ommelwani/gemini/antigravity/scratch`
+> (note: *not* `.gemini` — an older path in some docs).
+
+
 ## Project Purpose
 Valoura — shipped as the **Contextual Valuation Engine (CVE)** — is a
 context-specific stock valuation algorithm for technology stocks. Every ticker is
@@ -259,8 +289,30 @@ Keywords searched:
 
 ## Data Architecture
 
+> ⚠ **Before writing any code against AV, read the *AV Data Defects* section
+> below.** AV silently returns wrong-but-plausible data in nine documented ways
+> (frozen delisted prices, `"None"` strings, bogus delisting dates, discarded
+> fundamentals, reused tickers). Each one has cost real debugging time.
+
 ### Primary financial API — Alpha Vantage (AV)
-Quarterly fundamentals: INCOME_STATEMENT, CASH_FLOW, BALANCE_SHEET.
+Quarterly fundamentals: INCOME_STATEMENT, CASH_FLOW, BALANCE_SHEET, **EARNINGS**.
+
+**EARNINGS is the only endpoint carrying a filing date** (`reportedDate`). The
+three statement endpoints do not, which is why `backfill_fundamentals.py`
+fetches EARNINGS first and stamps `fundamentals.reported_date` by fiscal period.
+That column is what makes point-in-time backtesting honest — without it the
+backtester falls back to a flat 45-day-after-fiscal-end guess.
+
+**Field-name traps (both cost real money in wrong valuations):**
+- D&A is `depreciationDepletionAndAmortization`, **not** `depreciationAmortization`.
+  Reading the wrong name silently returns 0, collapsing EBITDA into operating
+  income and understating every EV/EBITDA cell.
+- Historical shares outstanding are in the BALANCE_SHEET as
+  `commonStockSharesOutstanding`. Use these for point-in-time market cap / EV —
+  `backtester.py` previously used *today's* share count for all history.
+- The live pipeline caps fundamentals at 20 quarters (`YEARS_OF_DATA * 4`).
+  `backfill_fundamentals.py` deliberately does **not**, and pulls the full
+  history AV holds (~81 quarters for mature names).
 
 **Tier: PRO ($50/month) — 75 req/min, NO daily cap.** Active since 2026-08.
 
@@ -349,15 +401,18 @@ overrides or substitutes for rules.
 
 ## Database (SQLite: valoura_backtest.db)
 
-Located at: `/Users/ommelwani/.gemini/antigravity/scratch/valoura_backtest.db`
+Located at: `/Users/ommelwani/gemini/antigravity/scratch/valoura_backtest.db`
 
 ### Tables
 | Table | Purpose |
 |-------|---------|
-| `price_data` | Daily OHLCV per ticker |
-| `fundamentals` | Raw AV quarterly JSON per ticker/statement/fiscal_date |
+| `price_data` | Daily OHLCV per ticker. Now spans **1962-01-02 → 2026-08-07**, 236 tickers (deepened by `backfill_fundamentals.py`; the live pipeline only stores 5y) |
+| `fundamentals` | Raw AV quarterly JSON per ticker/statement/fiscal_date. **55,759 rows** across 4 statement types incl. `EARNINGS`. Has a **`reported_date`** column (true filing date) — 51,920 rows populated |
 | `computed_metrics` | Derived LTM metrics + RPO columns (see below) |
 | `classifications` | BM + FH classification result per ticker/date |
+| `universe` | **Backtest universe** (11,009 rows) — see *Backtest Universe* below |
+| `overview_cache` | Cached AV `OVERVIEW` JSON per ticker (12,341). Makes universe rebuilds free |
+| `delisted_statement_probe` | Cached "does AV still hold statements for this delisted ticker?" probe (362) |
 | `valuations` | Primary multiple + full multiples JSON per ticker/date |
 | `fh_stage_history` | Last 8 quarters of FH stage per ticker (trajectory timeline) |
 | `metrics_extraction_log` | Audit trail for every LLM extraction attempt |
@@ -414,7 +469,14 @@ the fixed schema so the classification engine works unchanged.
 |------|------|
 | `data_pipeline1.py` | Core engine: ingestion, metric computation, BM+FH classification, valuation matrix, RPO qualifier, stage-change detection |
 | `run_universe.py` | Durable, resumable batch runner (scratch root + repo copy — **no longer in /tmp**). Skips already-classified tickers and already-cached statements. `python3 run_universe.py [TICKERS…] [--file list.txt]` |
-| `backfill_fh_history.py` | One-time bootstrap of `fh_stage_history` (zero AV calls) |
+| `backfill_fh_history.py` | One-time bootstrap of `fh_stage_history` (zero AV calls). **Not** the fundamentals backfill — see next row |
+| `backfill_fundamentals.py` | **Point-in-time history backfill.** Pulls FULL quarterly history (no 20-quarter cap) for INCOME_STATEMENT / BALANCE_SHEET / CASH_FLOW / EARNINGS, stamps each quarter with its true `reported_date` from EARNINGS, and deepens `price_data` to max history via yfinance. Resumable; re-runs cost ~0 calls |
+| `universe_builder.py` | Builds the `universe` table from AV `LISTING_STATUS` CSVs + an `OVERVIEW` crawl. `--build` rebuilds the table from cache with **zero API calls** |
+| `fix_delisting_dates.py` | Repairs bogus delisting dates using the frozen-price-tail detector (see *AV Data Defects*) |
+| `triage_review_list.py` | Filters delisted review candidates by statement availability, then auto-triages by name |
+| `build_repo_db.py` | Builds the slim DB shipped to the Streamlit repo (drops `price_data` + `fundamentals`, VACUUM: 211MB → 0.7MB) |
+| `BACKTEST_RULES.md` | **Authoritative backtester rules.** Rule 1 = hard-stop at true last trading day |
+| `PRE_BACKTEST_PLAN.md` | Method + findings log for the backfill and universe build |
 | `metrics_extractor.py` | Automated KPI + RPO extraction from SEC filings (Prong 3) |
 | `manual_metrics.json` | KPI store (auto-populated + manual review queue) |
 | `Valuora_Previous_UI/app.py` | Streamlit web app (CVE) — see *Web Application* below |
@@ -447,7 +509,7 @@ AV_RATE_LIMIT_BACKOFF = (15, 30, 60)
 
 `TICKERS` in `data_pipeline1.py` is the original **49-name seed list**, not the
 current universe. It remains the default argument for `run_universe.py` when no
-tickers are passed, but 221 tickers are now classified — the extras were added by
+tickers are passed, but 222 tickers are now classified — the extras were added by
 passing them explicitly:
 
 ```bash
@@ -613,6 +675,107 @@ in `~/.zshrc` — putting them only in Streamlit Cloud secrets is not enough.
 
 ---
 
+## Backtest Universe (`universe` table) — built 2026-08-11
+
+Built by `universe_builder.py` from Alpha Vantage `LISTING_STATUS` CSVs
+(`listing_status_active.csv`, `listing_status_delisted.csv`) plus a full
+`OVERVIEW` crawl. **Separate from `classifications`** — `universe` is the
+candidate pool for backtesting; `classifications` is what the engine has
+actually classified (222 tickers).
+
+| | |
+|---|--:|
+| rows | 11,009 (6,517 active / 4,492 delisted) |
+| `in_backtest = 1` | **502** (488 active + 14 delisted) |
+| `sector_unknown = 1` | 5,244 |
+
+**Filters:** `assetType == Stock`; exchange ∈ {NASDAQ, NYSE}; delisted cut at
+≥ 2012-01-01; **3,680 non-operating securities excluded** (2,932 units /
+warrants / rights + 1,860 SPAC shells). The exclusion removes only the
+derivative class, never the underlying — `GCTSW`/`GCTS-WS` go, `GCTS` stays.
+
+**`in_backtest` rule:** sector is Technology (or a tech-adjacent *industry*)
+AND market cap > $1B, OR the ticker is already in `classifications`.
+
+**The 14 delisted names** (human-reviewed, `stage3_review.xlsx`): SPLK, LN,
+INFA, OS, EVBG, WKME, ETWO, ENFN, MGIC, MIXT, STEC, SNCR, PET, EPWK.
+Five are foreign issuers (LN, MGIC, MIXT, STEC, EPWK) and will likely be
+dropped by the existing non-USD guard at classification, leaving ~9.
+
+**Survivorship-bias reality check.** All 14 delisted 2024+ except LN (2020).
+AV does not retain fundamentals for older delistings: of 362 delisted
+tech-sounding candidates, **360 (99%) had no financial statements at all** and
+the 2 survivors were a preferred share and a bond. This is an AV data limit,
+not a filter problem — the delisted cohort can only speak to recent years.
+
+**Known caveat — the market-cap floor is biased for delisted names.** Companies
+usually shrink before delisting, so a $1B floor on *final* market cap keeps
+premium acquisitions (winners) and drops failures — the opposite of what
+survivorship-bias correction needs. 16 delisted tech names sat below the floor;
+6 were admitted by manual review. Consider peak (not final) market cap if this
+is revisited.
+
+---
+
+## AV Data Defects — read before trusting Alpha Vantage output
+
+Hard-won during the 2026-08 universe build. Every one of these silently
+produces plausible-looking wrong answers.
+
+**1. AV returns the literal string `"None"`, not JSON null.**
+`(ov.get("Sector") or "").strip() or None` lets `"None"` through as if it were
+a real value. Use `_av_str()` (in `universe_builder.py`). This silently dropped
+~6% of tickers from review lists.
+
+**2. AV freezes delisted tickers — it does not stop serving them.**
+After the last real trade the close is carried forward with zero volume,
+forever:
+```
+SPLK 2024-03-15 close=156.90 vol=18,211,874   <- last real day
+SPLK 2024-03-18 close=156.90 vol=0            <- Cisco deal closes
+SPLK 2026-08-10 close=156.90 vol=0            <- still "trading" 2.4y later
+```
+One distinct close across 2.4 years. **A backtest reading this holds a flat,
+riskless, never-exiting position in a dead company.** This is why
+`BACKTEST_RULES.md` Rule 1 exists. Detector: last bar with volume ≥ 1% of the
+ticker's median volume (validated within one trading day on SPLK, SGEN, ACIA,
+CLDR, ARUN, EVBG).
+
+**3. `LISTING_STATUS` delisting dates are sometimes the file's snapshot date.**
+597 of 9,410 rows carried 2026-08-07 instead of the true date (Splunk, Seagen
+included). Repaired by `fix_delisting_dates.py`. `universe.delisting_date`
+stores the **last tradable day**, deliberately *not* AV's convention (the
+following business day), so it can be used as a direct trading cutoff.
+
+**4. AV discards fundamentals for older delisted tickers** (but keeps prices).
+Brocade, VASCO, Catalyst Semiconductor, Cloudera, Coupa: zero statements.
+Check statement availability *before* spending human review time on a name.
+
+**5. Ticker symbols get reused.** `SOS` = Storage Computer Corp (delisted) →
+SOS Ltd (live). Also `BMM`, `PALX`, `RAC`, `SSM`. Splicing a reused symbol
+joins two different companies into one price history. 32 such rows are
+`in_backtest = 0` with `delisting_date = NULL`.
+
+**6. AV's delisted CSV contains live companies.** `SMTK` and `ASNS` were listed
+as delisted while trading millions of shares and filing current financials;
+both were corrected to `is_delisted = 0`.
+
+**7. yfinance cannot substitute for delisted data** — it returns ZERO bars for
+delisted symbols (verified: SPLK, SGEN, ACIA, CLDR, ARUN). Yahoo purges them.
+
+**8. Substring matching on industry strings is a trap.**
+`"BIOTECHNOLOGY"` contains `"TECHNOLOGY"` — this swept 179 biotechs into the
+backtest universe (25% of it). But a full `\b…\b` match is ALSO wrong: it
+fails on `SEMICONDUCTORS` (AV's plural industry string) and would drop every
+chip company. Correct rule = **leading word boundary only**.
+
+**9. AV throws spurious `Invalid API call` errors** for valid symbols under
+sustained load; they succeed on retry. `_av_fetch` treats these as hard errors
+and does NOT retry — wrap it (see `_av_fetch_retry` in
+`backfill_fundamentals.py`).
+
+---
+
 ## Conventions
 
 - All metrics on LTM (last 12 months) basis except balance sheet items (MRQ).
@@ -631,6 +794,9 @@ in `~/.zshrc` — putting them only in Streamlit Cloud secrets is not enough.
 | Item | Priority | Notes |
 |------|----------|-------|
 | **Hyperscale category split — DEFERRED** | Decided | Splitting `hyperscale` into *pure cloud infrastructure* (MSFT/GOOGL/AMZN/CRWV/NBIS — usage-based compute, extreme CapEx) vs *diversified mega-cap* (IBM/ORCL — mixed legacy services + cloud) was considered and **deliberately deferred until after the backtest**. The two groups have genuinely different CapEx intensity and margin structure, and an 8-ticker category spanning both is doing real work to hold them together. But re-cutting the taxonomy now would invalidate the historical backfill: `fh_stage_history`, `stage_change_log` and every stored `valuations` row are keyed to the current `matrix_cell` strings, so a split means re-running the whole backfill against a moving target. **Backtest against the frozen v2 taxonomy first, then split with a `MATRIX_VERSION` bump and one clean re-run.** |
+| **Rule 1 not yet implemented in `backtester.py`** | **Blocker** | `BACKTEST_RULES.md` Rule 1 (hard-stop each ticker at its true last trading day) is **specified but NOT coded**. Until it is, any backtest including delisted names carries them at a frozen price forever and overstates returns. Do this before the next backtest run. |
+| Delisted cohort not yet ingested | High | The 14 approved delisted tickers are in `universe` with `in_backtest=1` but are **not in `classifications`**. Sequence: `backfill_fundamentals.py` → classify → then backtest. |
+| Backtest window hardcoded to 5y | Medium | `backtester.py:206` uses `end - 365*5` although fundamentals now reach 2006 and prices 1962. Widen to use the deeper history. |
 | Supabase RLS disabled | High | RLS is off on `users`, `watchlist`, `stage_change_log` so the anon key can write. Re-enable with per-user policies before real users. |
 | yfinance commercial use | High | Must migrate to licensed price data before production |
 | Empty matrix cells | Medium | hyperscale-4, saas-1, semi_hardware-1, deep_tech-4 have no occupants — ranges untested |
