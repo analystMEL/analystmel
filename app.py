@@ -74,91 +74,14 @@ def render_dark_table(headers, rows, highlight_first_col=None):
 # Each tuple: (display_name, val_data_key, low, high, unit, kind)
 # kind: "multiple" (higher=expensive), "yield" (higher=cheaper), "score" (higher=better)
 # ---------------------------------------------------------------------------
-FAIR_RANGES_FULL = {
-    "hyperscale-4": [
-        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
-        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
-    ],
-    "hyperscale-3": [
-        ("CapEx EV/EBIT","capex_adj_ev_ebit",  20,  35,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         25,  45,  "%", "score"),
-    ],
-    "hyperscale-2": [
-        # Floor lowered 6 -> 3 (v2.1): mature hyperscalers (AMZN 3.4x, IBM 3.6x)
-        # were scoring "Undervalued" against a floor calibrated for growth names.
-        ("EV/NTM Rev",   "ev_ntm_revenue",     3,   12,  "x", "multiple"),
-    ],
-    "hyperscale-1": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         6,   15,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
-    ],
-    "saas-4": [
-        ("FCF Yield",    "fcf_yield",          2.0, 3.5, "%", "yield"),
-        ("EV/FCF",       "ev_fcf",             20,  35,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         40,  60,  "%", "score"),
-    ],
-    "saas-3": [
-        ("EV/FCF",       "ev_fcf",             25,  45,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          0.8, 2.0, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         30,  50,  "%", "score"),
-    ],
-    "saas-2": [
-        ("EV/NTM ARR",   "ev_ntm_arr",         8,   18,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         15,  35,  "%", "score"),
-    ],
-    "saas-1": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         8,   20,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         0,   20,  "%", "score"),
-    ],
-    "semi_hardware-4": [
-        ("FCF Yield",    "fcf_yield",          2.5, 4.5, "%", "yield"),
-        ("PEG",          "peg_ratio",          0.5, 1.2, "x", "multiple"),
-    ],
-    "semi_hardware-3": [
-        ("Cycle P/E",    "cycle_adj_pe",       20,  35,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-    ],
-    "semi_hardware-2": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         1.5, 4.0, "x", "multiple"),
-    ],
-    "semi_hardware-1": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         0.5, 2.0, "x", "multiple"),
-    ],
-    "consumer_internet-4": [
-        ("P/E",          "pe_ratio",           15,  25,  "x", "multiple"),
-        ("EV/EBITDA",    "ev_ebitda",          12,  18,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          0.8, 1.5, "x", "multiple"),
-    ],
-    "consumer_internet-3": [
-        ("EV/EBITDA",    "ev_ebitda",          18,  30,  "x", "multiple"),
-        ("PEG",          "peg_ratio",          1.0, 2.5, "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         20,  40,  "%", "score"),
-    ],
-    "consumer_internet-2": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         4,   10,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
-    ],
-    "consumer_internet-1": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         1,   5,   "x", "multiple"),
-    ],
-    "deep_tech-4": [
-        ("FCF Yield",    "fcf_yield",          2.0, 4.0, "%", "yield"),
-        ("PEG",          "peg_ratio",          0.5, 1.5, "x", "multiple"),
-    ],
-    "deep_tech-3": [
-        ("EV/GP",        "ev_gross_profit",    15,  30,  "x", "multiple"),
-        ("Rule of 40",   "rule_of_40",         10,  30,  "%", "score"),
-    ],
-    "deep_tech-2": [
-        ("EV/NTM Rev",   "ev_ntm_arr",         5,   12,  "x", "multiple"),
-    ],
-    "deep_tech-1": [
-        ("EV/NTM Rev",   "ev_ntm_revenue",     20,  60,  "x", "multiple"),
-    ],
-}
+# The fair ranges and the verdict rule come from valuation_engine.py — the SAME
+# module the backtest panel builder uses. They used to be defined here as well,
+# and the two copies drifted: 7 of 20 cells keyed on `ev_ntm_arr`, which the
+# pipeline only writes for ARR-routed cells, so those cells silently rendered no
+# verdict at all. Do not re-add a local copy.
+import valuation_engine as _ve
+
+FAIR_RANGES_FULL = _ve.FAIR_RANGES_FULL
 
 
 def derive_verdict(matrix_cell, val_data):
@@ -167,22 +90,47 @@ def derive_verdict(matrix_cell, val_data):
     Returns (verdict, metric_display_name, value) where verdict is
     "Undervalued" | "Fair" | "Overvalued" | None (no data).
     """
-    fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
-    if not fair_rows:
-        return None, None, None
-    disp, key, lo, hi, unit, kind = fair_rows[0]
-    v = (val_data or {}).get(key)
-    if v is None:
-        return None, disp, None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None, disp, None
-    if kind in ("yield", "score"):
-        verdict = "Fair" if lo <= f <= hi else ("Undervalued" if f > hi else "Overvalued")
-    else:  # multiple — lower is cheaper
-        verdict = "Fair" if lo <= f <= hi else ("Undervalued" if f < lo else "Overvalued")
-    return verdict, disp, f
+    # Rolling bands: judge the name against its cohort's own trailing 5-year
+    # median rather than a number fixed in 2026. Falls back to the static v2
+    # band automatically when `cell_bands` is missing or a cell is too thin.
+    bands = _get_cell_bands()
+    v, disp, value, _lo, _hi = _ve.verdict(matrix_cell, val_data or {}, bands)
+    # The engine speaks lowercase; the UI has always shown title case.
+    return (v.title() if v else None), disp, value
+
+
+@st.cache_data(ttl=3600)
+def _get_cell_bands():
+    conn = get_db_connection()
+    return _ve.load_bands(conn) if conn is not None else {}
+
+
+def fair_rows_for(matrix_cell):
+    """Display rows for a cell with the PRIMARY band swapped for the live one.
+
+    Only the primary metric drives the verdict, so only its numbers are
+    re-centred; the secondary qualifiers keep their reference ranges.
+    """
+    rows = list(_ve.FAIR_RANGES_FULL.get(matrix_cell, []))
+    b = (_get_cell_bands() or {}).get(matrix_cell)
+    if rows and b and b.get("source") == "rolling" and b.get("lo") is not None:
+        d, k, _lo, _hi, u, kind = rows[0]
+        rows[0] = (d, k, round(b["lo"], 2), round(b["hi"], 2), u, kind)
+    return rows
+
+
+def band_caption(matrix_cell):
+    """One line describing where the band came from, for display next to it."""
+    b = (_get_cell_bands() or {}).get(matrix_cell)
+    if not b:
+        return "Fair range: fixed reference band."
+    if b.get("source") == "rolling" and b.get("median"):
+        return (f"Fair range = 0.7x-1.3x the cohort's median of "
+                f"{b['median']:.2f}, measured over {b['window_start']} to "
+                f"{b['window_end']} ({b['n_obs']:,} observations). "
+                f"It re-centres each quarter as the cohort re-rates.")
+    return ("Fair range: fixed reference band — this cohort has too little "
+            "history for a rolling one.")
 
 
 def get_active_flags(conn, ticker):
@@ -1205,12 +1153,15 @@ def render_classified_universe(conn):
         "saas":              "SaaS",
         "semi_hardware":     "Semi / Hardware",
         "consumer_internet": "Consumer Internet",
-        "deep_tech":         "Deep Tech",
+        "deep_tech":         "Mixed / Pre-Revenue",
+        "it_services":       "IT Services",
     }
     _STAGE_COLOURS = {1: "#ef4444", 2: "#f59e0b", 3: "#3b82f6", 4: "#22c55e"}
     _STAGE_LABELS = {1: "Stage 1", 2: "Stage 2", 3: "Stage 3", 4: "Stage 4"}
 
-    for _bm_key in ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]:
+    # Order from the engine — a hardcoded list silently hid it_services
+    # from this grid while the footer still counted 6 categories.
+    for _bm_key in _ve.CATEGORY_ORDER:
         if _bm_key not in _by_bm:
             continue
         _tickers_in_bm = _by_bm[_bm_key]
@@ -1900,13 +1851,9 @@ def main_dashboard():
                     st.rerun()
 
     # --- Control Row: classified-ticker selectbox + unclassified free-text ---
-    _CAT_NAV_DISPLAY = {
-        "hyperscale":        "Hyperscale",
-        "saas":              "Pure SaaS",
-        "semi_hardware":     "Semi / Hardware",
-        "consumer_internet": "Consumer Internet",
-        "deep_tech":         "Deep Tech",
-    }
+    # Labels live in the engine so a new category (it_services) cannot appear
+    # in one place and be missing in another.
+    _CAT_NAV_DISPLAY = dict(_ve.CATEGORY_LABELS)
     _tick_conn = get_db_connection()
     _ticker_options = []          # list of display strings
     _ticker_map = {}              # display string -> raw ticker
@@ -2030,7 +1977,7 @@ This introduction serves to explain how to navigate this platform. Here are the 
         st.markdown("""
 The Stage-Based Analysis layer has been in the works for months. This tab shows the functional interpretation layer and valuation logic that fits each company at any point in its development. It serves as a contextual engine — built on the premise that *valuation without context is noise*.
 
-The right metric for a cash-burning deep tech startup is not the same metric for a cash-compounding enterprise software platform, and applying one framework universally is how private investors end up with misleading conclusions.
+The right metric for a cash-burning pre-revenue company is not the same metric for a cash-compounding enterprise software platform, and applying one framework universally is how private investors end up with misleading conclusions.
 
 A semiconductor company mid-cycle is valued differently from one at cycle peak. A SaaS company with 40% stock-based compensation is not the same business as one with 3%. A hyperscale platform requires segment-level decomposition before a meaningful multiple can be applied. That institutional knowledge is not accessible in most tools built for private investors.
         """)
@@ -2039,17 +1986,32 @@ A semiconductor company mid-cycle is valued differently from one at cycle peak. 
         st.markdown("""
 Every stock ticker is classified across two independent axes: **business model category** and **financial health stage**. The classification determines which valuation metrics apply, what the fair ranges are for those metrics, and which peer group is the meaningful comparison. The result is an analysis that reflects what the company actually is — not a generic score applied uniformly across an entire index.
 
-A synthesis layer reads the full classification, the valuation output, and the peer comparison to produce a plain-English interpretation of where the company stands. Not a buy or sell signal. A clear, evidence-based picture of what the data says.
+A synthesis layer reads the full classification, the valuation output, and the peer comparison to produce a plain-English interpretation of where the company stands.
+
+**What this tool does, precisely.** It tells you where a company's valuation sits **relative to its own cohort's recent history** — whether semiconductors at stage 3 are expensive by their own five-year standard, not whether this semiconductor is a better buy than that one. The fair range for each cell is re-centred every quarter on that cohort's trailing five-year median, so a verdict means "rich or cheap for this kind of company, lately".
+
+**On the "Mixed / Pre-Revenue" category.** This is the residual bucket, not a thesis. A company lands there when no single revenue stream reaches 40% of the total, or when it is pre-revenue — so it mixes frontier hardware with software, semiconductors and platforms the other four models did not claim. It was previously labelled "Deep Tech", which described most of its members incorrectly.
+
+**What it does not do.** It does not tell you which stock inside a cohort to buy. We tested that claim directly and it did not hold: across the full 2012-2026 panel, ranking companies within a cell and quarter from cheapest to dearest produced no advantage for the cheap ones at any split width, in either half of the period, or out-of-sample. Where a relationship appeared at all, it ran the other way. Anyone using this to pick between two companies in the same cell is using it for something the evidence does not support.
         """)
 
         st.subheader("Status")
         st.markdown("""
-Currently covers the US technology sector across five business model categories and four financial health stages. Expansion into retail, financial services, healthcare, and industrials is in development. A backtesting layer to validate the classification framework against historical returns is also in progress.
+Currently covers the US technology sector across five business model categories and four financial health stages. Expansion into retail, financial services, healthcare, and industrials is in development.
+
+**Backtest status — read this before trusting any number here.** The framework has been tested against 2012-2026 history (17,291 stock-quarters). Two findings shape what the tool claims:
+
+- Fair ranges are now **rolling**, not fixed. Absolute bands drifted badly against a decade of multiple expansion — 75.6% of 2012 observations read "undervalued" against 43.0% of 2026 ones — which meant the verdict was partly reporting the calendar rather than the company.
+- The **cross-sectional claim failed**. Picking the cheapest names within a cohort did not beat picking the dearest, under every test we ran. That claim has been removed from the product rather than softened.
+
+What survived testing is cohort context: where a group of similar companies sits against its own recent history. That is what the verdict now means.
         """)
 
         st.subheader("Who it is for")
         st.markdown("""
-Private investors who want to understand a stock rather than simply be told what to do with it. Anyone who has looked at a P/E ratio and wondered whether it actually means anything for the company they are looking at. Analysts and researchers who want a structured first-pass classification before building their own view.
+Private investors who want to understand a stock rather than simply be told what to do with it. Anyone who has looked at a P/E ratio and wondered whether it actually means anything for the company they are looking at. Analysts and researchers who want a structured first-pass classification, and a read on whether a whole cohort looks stretched against its own history, before building their own view.
+
+It is context, not a recommendation engine. If you want a ranking of which stock to buy, this is the wrong tool and we would rather say so than imply otherwise.
         """)
 
         st.markdown("---")
@@ -2677,13 +2639,14 @@ Private investors who want to understand a stock rather than simply be told what
         st.markdown(f"<div class='fun-header'>Analysis: {ticker_symbol}</div>", unsafe_allow_html=True)
 
         # ── Constants ────────────────────────────────────────────────────────
-        BM_CATEGORIES = ["hyperscale", "saas", "semi_hardware", "consumer_internet", "deep_tech"]
+        BM_CATEGORIES = list(_ve.CATEGORY_ORDER)
         CAT_DISPLAY = {
             "hyperscale":        "Hyperscale",
             "saas":              "SaaS",
             "semi_hardware":     "Semi / HW",
             "consumer_internet": "Consumer Internet",
-            "deep_tech":         "Deep Tech",
+            "deep_tech":         "Mixed / Pre-Rev",
+            "it_services":       "IT Services",
         }
         # Plain-English one-paragraph description per BM category — shown inside Section 5 tabs.
         BM_DESCRIPTIONS = {
@@ -2992,7 +2955,8 @@ Private investors who want to understand a stock rather than simply be told what
                         "saas":              "SaaS",
                         "semi_hardware":     "Semi/HW",
                         "consumer_internet": "Consumer",
-                        "deep_tech":         "Deep Tech",
+                        "deep_tech":         "Mixed/Pre-Rev",
+                        "it_services":       "IT Svcs",
                     }
 
                     grid_rows = []
@@ -3254,10 +3218,15 @@ Private investors who want to understand a stock rather than simply be told what
                         # valuation_metrics: zip fair-range table with current values
                         _val_metrics = []
                         _val_data_local = val_data if (val_row and val_json_str) else {}
-                        for (_dn, _vk, _lo, _hi, _u, _kind) in FAIR_RANGES_FULL.get(matrix_cell, []):
+                        # The PRIMARY metric's judgement is the engine's to make —
+                        # this block used to re-derive cheap/rich inline, a third
+                        # copy of the rule that bypassed cell suppression.
+                        # Secondary qualifiers keep their descriptive wording.
+                        _suppressed = _ve.suppression_reason(matrix_cell) is not None
+                        for _i, (_dn, _vk, _lo, _hi, _u, _kind) in enumerate(fair_rows_for(matrix_cell)):
                             _cv = _val_data_local.get(_vk)
                             _verdict = None
-                            if _cv is not None:
+                            if _cv is not None and not (_i == 0 and _suppressed):
                                 try:
                                     _cvf = float(_cv)
                                     if _kind == "yield":
@@ -3285,7 +3254,7 @@ Private investors who want to understand a stock rather than simply be told what
                             (matrix_cell,),
                         ).fetchall()
                         _cell_peers = []
-                        _primary_keys_for_cell = [t[1] for t in FAIR_RANGES_FULL.get(matrix_cell, [])][:1]
+                        _primary_keys_for_cell = [t[1] for t in fair_rows_for(matrix_cell)][:1]
                         _primary_key = _primary_keys_for_cell[0] if _primary_keys_for_cell else None
                         for _pr_ticker, _pr_method, _pr_json in _cell_peer_rows:
                             _pv = None
@@ -3389,8 +3358,11 @@ Private investors who want to understand a stock rather than simply be told what
                         "<p style='color:#94a3b8;font-style:italic;font-size:0.82em;"
                         "margin-top:14px;border-top:1px solid #1e293b;padding-top:10px;'>"
                         "This interpretation is generated from quantitative classification data only. "
-                        "It is not financial advice and does not constitute a recommendation to buy "
-                        "or sell any security."
+                        "The verdict says where this company sits against its own cohort's "
+                        "trailing five-year history — not whether it is a better buy than another "
+                        "company in the same cohort, which the engine has been tested for and "
+                        "does not predict. It is not financial advice and does not constitute a "
+                        "recommendation to buy or sell any security."
                         "</p>",
                         unsafe_allow_html=True,
                     )
@@ -3450,7 +3422,7 @@ Private investors who want to understand a stock rather than simply be told what
                             )
 
                         # Addition 3: Full fair-range reference — 3 columns only (no Verdict)
-                        fair_rows = FAIR_RANGES_FULL.get(matrix_cell, [])
+                        fair_rows = fair_rows_for(matrix_cell)
                         if fair_rows:
                             th_s = ("padding:14px 18px;text-align:left;color:#7dd3fc;"
                                     "font-size:1.05em;font-weight:700;"
@@ -3493,6 +3465,29 @@ Private investors who want to understand a stock rather than simply be told what
                                 + '</tbody></table></div>',
                                 unsafe_allow_html=True,
                             )
+                            st.caption(band_caption(matrix_cell))
+
+                        # Suppression notice sits OUTSIDE the fair-rows block on
+                        # purpose. A no-model category (it_services) has no fair
+                        # rows at all, so nesting this inside would show an
+                        # IT-services user a blank panel and no explanation —
+                        # the one case that most needs one.
+                        # A residual bucket must say so where the user reads the
+                        # category, not only in the About page.
+                        _note = _ve.category_note((matrix_cell or "").rsplit("-", 1)[0])
+                        if _note and not _ve.suppression_reason(matrix_cell):
+                            st.caption(f"**About this category.** {_note}")
+
+                        _why = _ve.suppression_reason(matrix_cell)
+                        if _why:
+                            st.markdown(
+                                "<div style='background:rgba(245,158,11,0.08);"
+                                "border:1px solid rgba(245,158,11,0.45);border-radius:10px;"
+                                "padding:12px 16px;margin-top:10px;'>"
+                                "<b style='color:#fbbf24;'>No cheap/expensive verdict for "
+                                f"this cohort.</b><br><span style='color:#cbd5e1;"
+                                f"font-size:0.92em;'>{_why}</span></div>",
+                                unsafe_allow_html=True)
 
                         st.markdown("---")
 
@@ -3565,7 +3560,7 @@ Private investors who want to understand a stock rather than simply be told what
 
                     if _cell_count >= _MODE_A_THRESHOLD:
                         # ── MODE A: same matrix cell, value on cell's primary metric ──
-                        _fair_rows_for_cell = FAIR_RANGES_FULL.get(matrix_cell, [])
+                        _fair_rows_for_cell = fair_rows_for(matrix_cell)
                         if _fair_rows_for_cell:
                             _disp_name, _val_key, _lo, _hi, _u, _kind = _fair_rows_for_cell[0]
                         else:

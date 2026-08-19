@@ -366,6 +366,23 @@ def render_backtest_page(conn, render_dark_table):
         "<li><b>Non-USD filers are excluded entirely</b> (TSM, ASML, SAP, BABA and 38 "
         "others). No currency mixing — but the universe is US-listed USD reporters only.</li>"
 
+        "<li><b>THE CROSS-SECTIONAL CLAIM FAILED — read this first.</b> Robustness "
+        "testing (500-permutation placebo, four split widths, two sub-periods, and an "
+        "out-of-sample run) found <b>no advantage to the cheapest names within a cohort</b>. "
+        "Ranking a cell's stocks cheapest-to-dearest each quarter gave +0.1pp for "
+        "semiconductors, and negative spreads for SaaS and consumer internet. The one "
+        "apparent survivor collapsed out-of-sample once tested against its own null "
+        "(+14.3pp raw, but its placebo null centres at +11.2pp; residual p=0.106). "
+        "Every portfolio number on this page rests on a selection rule the evidence "
+        "does not support.</li>"
+
+        "<li><b>Bootstrap intervals understate uncertainty on unbalanced legs.</b> The "
+        "bootstrap resamples within each leg, so it cannot see bias arising from "
+        "cross-group weighting. Any scheme whose undervalued and overvalued legs differ "
+        "in size per quarter has a null centred away from zero, and its CI will look "
+        "significant when it is not. Only an even split (equal counts per group) has a "
+        "null at zero by construction.</li>"
+
         "<li><b>Position selection is not part of the engine.</b> The verdict leaves ~140 "
         "candidates per quarter for 5 slots, so a ranking had to be invented. Picking at "
         "random from the same pool beat the ranking (£143,759 median vs £77,231), and "

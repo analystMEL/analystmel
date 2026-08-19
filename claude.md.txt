@@ -79,8 +79,14 @@
 > lacks yfinance. Credentials load from `~/.zshrc`, which does **not** propagate
 > into Bash subshells; the scripts parse it directly.
 >
-> **Working directory:** `/Users/ommelwani/gemini/antigravity/scratch`
-> (note: *not* `.gemini` — an older path in some docs).
+> **Working directory:** `/Users/ommelwani/gemini/antigravity/scratch/CVE_Engine`
+> (moved and renamed 2026-08-16; note *not* `.gemini` — an older path in some
+> docs). No space in the name, so no quoting needed. Scripts self-locate via
+> `os.chdir(os.path.dirname(os.path.abspath(__file__)))` and run correctly from
+> anywhere. `oasisdilemna`, `productivity-suite`, `smart-switch-engine` and the
+> emulator `.ini` files stayed in `scratch` — they are not CVE. `.claude/` also
+> stayed (it configures the scratch root); its `launch.json` cve-app entry
+> points at `CVE_Engine/Valuora_Previous_UI/app.py`.
 
 
 ## Project Purpose
@@ -1154,11 +1160,439 @@ predate the split. `price_integrity_check.py` should run after each backfill,
 and the real fix is for the ingest path to re-write (not `INSERT OR IGNORE`)
 history when a split is detected.
 
+### `integrity_check.py` — standing data-integrity suite (built 2026-08-15)
+
+Built to `~/Downloads/integrity_check_spec.md`. 33 tests across 5 suites, written
+*independently* of the code that produced the data: they ask "is this value
+physically possible", not "did the pipeline run". **Reports only — never repairs.**
+Exit 1 on any CRITICAL, so it can gate the pipeline.
+
+```bash
+caffeinate -i /usr/bin/python3 integrity_check.py --all 2>&1 | tee integrity_run.log
+/usr/bin/python3 integrity_check.py --ticker NVDA     # one ticker, all suites
+/usr/bin/python3 integrity_check.py --report          # reprint last run
+```
+Results checkpoint to `integrity_results` per suite; detail to
+`integrity_failures.csv` (never to console).
+
+**P2 confirms the KLA repair holds — 0 scaled segments.** The detector that
+would have caught the original defect now finds nothing, independently of
+`price_integrity_check.py`.
+
+**Four spec tests were not runnable as written** and say so in the output rather
+than silently passing: P2/P4 need a raw close alongside the adjusted close
+(`price_data` stores only the adjusted one — **storing raw close is the single
+highest-value schema change**, it would catch splices that produce no visible
+jump); F7 has no `period_type` column; R5's `valuation_engine.py` does not exist,
+so it reads `FAIR_RANGES_FULL` out of `app.py` by AST instead.
+
+**8 CRITICAL failures. None invalidate Backtest #1 — combined contamination is
+under 0.5% of panel rows — but three need fixing before Backtest #2:**
+
+| Test | Finding | Study impact |
+|---|---|---|
+| **T1** | **554 rows with `reported_date <= fiscal_date`** — a quarter cannot be filed before it ends. 471 on panel tickers (APLD 65, APPS 40, SHAZ 32, RZLV 28, OLED 24, CRWV 16). | **The most consequential.** A filing dated at its own quarter-end enters the panel ~30–45 days before it was public — a real point-in-time leak. **Fix: treat `reported_date <= fiscal_date` as missing and fall back to `fiscal_date + 45d`.** |
+| **F5** | **3 tickers change reporting currency mid-series** — NBIS (RUB:173 / USD:22), MIXT (ZAR:145 / USD:3), LN (USD:50 / JPY:15). All three are in the panel (58 rows). | The B6 currency gate reads yfinance's *current* `financialCurrency` and is blind to a mid-series change. NBIS is 1 of only 8 hyperscale names and carries a manual override, so its ratios matter out of proportion to its row count. |
+| **P1** | 44 day-over-day moves at a round split ratio; 33 on panel tickers since 2011. | **21 panel rows** (0.12%) have a 12m window spanning one — APPS, ASNS, BKSY, ETWO, DLO, APLD, KEEL, LUNR. Same class as the KLA defect, in small caps. Needs per-name review; too small to move any conclusion. |
+| F1 | 127 balance sheets off by >25% (assets ≠ liabilities + equity) | Parse failures; affects debt/equity and EV inputs. A further 2,102 off by 1–25% are reported separately as F1b — that band is normally non-controlling interests, which AV excludes from `totalShareholderEquity`, not a bug. |
+| F4 | 44 order-of-magnitude revenue changes | Mostly pre-2012 micro-caps outside the window (APLD 2002). |
+| P3 | 5 NULL closes, all on 2026-06-26 | One bad ingest day. Trivial. |
+| R5 | **10 of 19 sampled pairs disagree** between the app and the panel | Quantifies the known `ev_ntm_arr` bug — the app renders *no verdict* for the affected cells. Independent confirmation. |
+| X1 | 1 row (ASNS) | Was 318 until the test was corrected — see below. |
+
+**Two of my own test bugs, found and fixed during the build** (worth recording,
+because both are the kind that make a check look clean when it isn't):
+- **SQL precedence.** `WHERE a > 1000 OR b < -99 AND ticker=?` binds as
+  `a OR (b AND ticker)`, so `--ticker NVDA` silently returned the whole
+  universe. Parenthesise the OR group before appending a filter.
+- **`LIMIT` reported as a count.** "5,000 rows before ipo_date" was the limit,
+  not the finding. Count and sample must be separate queries.
+- X1 originally compared `computed_metrics.market_cap` against the price at
+  `as_of_date` and flagged 318 tickers. `market_cap` is built from the **live**
+  price at pipeline-run time (ratio against the latest close is exactly 1.000
+  across the table), so the test was measuring elapsed market movement. Now
+  compared on its own terms, with the misalignment reported as X1b. Worth
+  knowing: `computed_metrics.market_cap` is *not* point-in-time with its own
+  `as_of_date`. `backtest_panel` recomputes market cap itself and is unaffected.
+
+### Backtest 1.1 (RR) — Phase 1 cleaning + Phase 2 verdict unification
+
+DB backed up first: `valoura_backtest.db.bak.20260815_173408`.
+**CRITICAL integrity failures 8 → 0** (`integrity_check.py --all` exits 0).
+
+#### Phase 1 — exclusions and repairs (`phase1_clean.py`, logged to `data_exclusions`)
+
+| Defect | Excluded | Flagged | Note |
+|---|--:|--:|---|
+| T1 | 554 rows | — | `reported_date=NULL`, `reported_date_missing=1`; panel drops them |
+| F5 | **3 tickers** | — | LN, MIXT, NBIS |
+| F1 | 37 rows | 125 rows | 2 sign-flips + 35 genuine breaches |
+| F4 | 4 rows | 64 rows | units errors out, ramps reviewed |
+| P3 | 5 rows | — | one bad provider day |
+| X1 | **1 ticker** | — | ASNS (stale share count) |
+| P1 | 0 | 6 adjudicated | **no repair needed** |
+
+**Tickers excluded entirely: LN, MIXT, NBIS, ASNS.** `in_backtest` 502 → 498.
+
+**Three briefed fixes did not survive contact with the data:**
+- **T1 was never our parser.** `backfill_fundamentals.py` already used
+  `rmap.get(fd)` (None on a miss). **Alpha Vantage itself emits
+  `reportedDate == fiscalDateEnding`** — confirmed against the *live* API, which
+  still returns 17 such quarters for APLD, 16 for SHAZ, 7 for RZLV. **0 of 554
+  recoverable**; the real dates do not exist at this provider. Gate added at
+  ingest: `backfill_fundamentals.py::_valid_reported_date`. No lag imputed.
+- **P1 found no surviving splits.** All 13 checkable tickers match a fresh
+  yfinance pull (spread ≤1.10). 38 of 44 flagged moves sit on a volume spike vs
+  their own 60-day median — ACLS 0.337 is the real Sept-2008 crash (10.9x
+  volume), ASNS 6,135x, LUNR 163x. The round-ratio rule was the defect. Fixed
+  with volume corroboration (44 → 6) plus an adjudication table so settled
+  human decisions are not re-litigated each run. The split repair **is**
+  direction-agnostic (it compares min/max ratio spread, catching reverse splits
+  — KLAC's own fix included a 0.101 downward leg).
+- **F1's sign flip explains 2 of 127**, not most. The other 125 are
+  non-controlling interests AV excludes from `totalShareholderEquity`. Splitting
+  on the sign of `A−L−E` isolated **35 genuine breaches**, which were excluded.
+
+**P6 is 120,680 rows / 106 tickers, not 5,000 / 9** (that was a CSV row cap),
+and **the instructed fix was deliberately not applied**: for 27 tickers with
+`ipo_date` after 2011 (DXC, MTCH, QUBT, RZLV and other de-SPACs) the ipo_date is
+*correct* and the earlier prices belong to the shell or predecessor. Moving
+ipo_date back would inject that history into the panel. The other 79 are
+off-by-days (33) or pre-2012 legacy dates (46) that cannot affect a 2012+ panel.
+
+#### Phase 2 — one verdict function (`valuation_engine.py`, NEW)
+
+The rule lived in two places and drifted. It now lives **only** in
+`valuation_engine.py`; `build_panel.py` and `app.py` both import it.
+- `build_panel.py`: `PANEL_MATRIX` + `verdict_for()` **deleted**.
+- `app.py`: local `FAIR_RANGES_FULL` **deleted**; `derive_verdict()` delegates
+  to `ve.verdict()` and only title-cases for display.
+- Metric lookup is by an **ordered key list per metric** with normalisation, so
+  `ev_ntm_arr` / `ev_ntm_revenue` / `EV/NTM_ARR` all resolve.
+- **`data_pipeline1.VALUATION_MATRIX` re-routed at source**: the three S1 cells
+  and `saas-2` now compute `ev_ntm_revenue`. They previously routed to
+  "EV/Revenue and CapEx/TTM Revenue" / "P/S and MAU", which compute neither key
+  — the other half of the blank-verdict defect. 50 tickers recomputed.
+
+**R5 verification: 50 sampled pairs · 0 blanks · 0 contradictions.** All 18
+populated cells resolve (hyperscale-4 and saas-1 remain unoccupied). R5 now also
+asserts *structurally* that app.py holds no second copy of the rule.
+
+> **Watch item for Test 1 interpretation:** saas-2's band (8–18x) was calibrated
+> for EV/NTM **ARR**, but ARR is known for almost no ticker, so the cell falls
+> back to EV/NTM **Rev** against the same band. WB reads 1.39x and STUB 1.84x →
+> both "undervalued". This is unchanged from Backtest #1 (the old PANEL_MATRIX
+> did the same), but it means saas-2's large positive spread may be a band/metric
+> scale mismatch rather than signal.
+
+#### Phase 3 — Test 1 rerun as Backtest 1.1 (RR) (`analyze_test1_rr.py`)
+
+Panel rebuilt from cleaned data: **17,291 rows · 427 tickers**, every row tagged
+`backtest_version = '1.1-RR'`; `matrix_version` unchanged at `v2-2026-08`.
+
+**Headline: the cleaning changed almost nothing. The bootstrap changed a lot.**
+
+| Cell | before | after | change | n(u)/n(o) | 95% CI | verdict |
+|---|--:|--:|--:|---|---|---|
+| deep_tech-3 | +54.3 | **+53.8** | −0.5 | 196/33 | [+25.9, +65.4] | CONFIRMS |
+| saas-2 | +37.0 | **+37.0** | −0.0 | 984/102 | [+17.7, +54.4] | CONFIRMS |
+| deep_tech-2 | +37.8 | **+36.6** | −1.2 | 291/83 | [+15.8, +51.0] | CONFIRMS |
+| consumer_internet-2 | +27.9 | **+27.4** | −0.6 | 956/112 | [+16.8, +38.8] | CONFIRMS |
+| saas-3 | +9.9 | **+9.6** | −0.2 | 828/638 | [+5.5, +14.1] | CONFIRMS |
+| semi_hardware-3 | +5.5 | **+5.5** | +0.0 | 983/1252 | [+1.5, +10.1] | CONFIRMS |
+| semi_hardware-4 | +10.0 | +10.0 | +0.0 | 145/60 | [−5.9, +35.8] | not distinguishable |
+| semi_hardware-2 | +6.4 | +6.5 | +0.1 | 1617/287 | [−2.8, +14.2] | not distinguishable |
+| consumer_internet-3 | +4.3 | +4.5 | +0.2 | 1065/321 | [−3.1, +12.9] | not distinguishable |
+| saas-4 | +1.6 | +2.2 | +0.5 | 261/96 | [−9.9, +21.4] | not distinguishable |
+| hyperscale-3 | −2.1 | −2.1 | +0.0 | 72/76 | [−10.4, +8.0] | not distinguishable |
+
+**Backtest #1 said "10 of 11 cells confirm". With confidence intervals, 6 of 11
+survive and 5 are statistically indistinguishable from zero.** No cell
+contradicts. That correction comes from adding uncertainty quantification, not
+from cleaning — the original analysis simply had none.
+
+**The contamination hypothesis is not supported.** The expectation was that
+defects clustering in APLD / QUBT / LUNR / ASTS / ACHR would deflate the
+deep-tech cells. Two independent checks say otherwise:
+1. Every one of those tickers contributes **exactly the same number of panel
+   rows before and after** (APLD 17→17, QUBT 28→28, LUNR 15→15, ASTS 23→23,
+   ACHR 19→19). The T1 exclusions were mostly EARNINGS rows, which
+   `compute_metrics` never reads, and the affected statement quarters had
+   surviving neighbours.
+2. **The deep-tech cells are not made of those names.** deep_tech-2's largest
+   contributors are VRNS, AGYS, APPS, BAND, LDOS, CACI; deep_tech-3's are JKHY,
+   ACIW, CACI, CEVA, LDOS. These are the profitable **IT-services / no-clean-fit**
+   companies from the known taxonomy gap, not speculative pre-revenue deep tech.
+   deep_tech-3's +53.8 is real and survives the bootstrap — but it is evidence
+   about a mislabelled IT-services bucket, not about deep tech.
+
+**Correction to a Backtest #1 headline.** The regime table there used the MEAN
+and reported the AI cycle *inverting* (−9.2pp). On the median — the statistic
+that analysis itself said to believe — no inversion exists:
+
+| Regime | before | after | n(u)/n(o) |
+|---|--:|--:|---|
+| ZIRP 2012-21 | +5.6 | **+5.6** | 5111/1859 |
+| Rate shock 2022-23 | +19.8 | **+19.9** | 1081/449 |
+| AI cycle 2023-26 | +1.2 | **+1.2** | 1527/901 |
+
+All three regimes are positive on the median; the engine is strongest when rates
+bite and roughly flat in the melt-up. **Pass condition 3 holds on the median.**
+
+Pooled: 12m spread +7.4pp median (u 15.9% vs o 8.5%, hit 67.4% vs 57.0%);
+horizon monotonicity intact (3m +1.4 · 6m +2.8 · 12m +7.4).
+
+Band drift persists and is the clearest remaining calibration problem:
+**75.6% of 2012 rows read undervalued vs 43.0% of 2026 rows.**
+
+> **Treat saas-2's +37.0 with suspicion despite its interval.** Its band (8–18x)
+> was calibrated for EV/NTM ARR, but ARR is unknown for nearly every ticker, so
+> the cell compares EV/NTM **Rev** against an ARR band — WB at 1.39x and STUB at
+> 1.84x both read "undervalued". Same behaviour as Backtest #1, so the
+> comparison is valid, but the level is probably a scale mismatch.
+
+### Band calibration — four schemes tested (`analyze_bands.py`, 2026-08-15)
+
+**Why:** the absolute v2 bands drift (75.6% undervalued in 2012 → 43.0% in 2026),
+producing legs of 984/102 (saas-2), 956/112 (consumer_internet-2), 1617/287
+(semi_hardware-2), 196/33 (deep_tech-3). Those are not cheap-vs-expensive
+comparisons; they are the bulk of a bucket against a small extreme tail.
+
+Schemes, all on the same 1.1-RR panel and the same forward returns:
+
+| | scheme | drift | live-usable |
+|---|---|---|---|
+| A | **absolute** — current v2 bands | 75.6% → 43.0% | yes |
+| B | **percentile** — cheapest vs dearest third within cell AND quarter | **31.9% → 32.4%, flat by construction** | yes |
+| C | **regime** — bands refitted per rate era (33rd/67th pct) | 56.3% → 34.4% | **no — hindsight** |
+| D | **rolling** — 0.7x–1.3x the cell's trailing 5y median, point-in-time | 27.5% → 36.1% | yes |
+
+#### The headline: the lopsided legs were carrying the result
+
+| Cell | absolute | percentile | regime | rolling |
+|---|--:|--:|--:|--:|
+| saas-2 | **+37.0** CONFIRMS | **−15.0 CONTRADICTS** | +11.8 CONFIRMS | −9.4 n.d. |
+| consumer_internet-2 | **+27.4** CONFIRMS | **−10.3 CONTRADICTS** | −6.5 n.d. | −8.7 CONTRADICTS |
+| deep_tech-3 | **+53.8** CONFIRMS | +22.6 n.d. | +14.0 CONFIRMS | +6.6 n.d. |
+| semi_hardware-2 | +6.5 n.d. | +1.2 n.d. | +6.5 CONFIRMS | +7.2 CONFIRMS |
+
+Balance goes 0.10 → 1.00 under the percentile split, and **saas-2 and
+consumer_internet-2 change sign**. The two largest "confirming" spreads in
+Backtest 1.1 were artefacts of tail-vs-bulk comparison.
+
+**Under a strict cross-sectional test (percentile), NOT ONE CELL CONFIRMS.**
+
+#### What that means
+
+Absolute bands conflate **market timing** with **stock selection**. Held fixed
+across 2012–2026 they mostly label whole *eras* cheap or expensive (everything
+is cheap in 2012), so the "spread" is substantially "buy when the whole cell is
+cheap", not "buy the cheapest names in the cell". Rank within a quarter — which
+removes the time dimension entirely — and the cross-sectional signal is ~0.
+
+The schemes that keep a signal (regime, rolling) both retain a time-series
+component, which is consistent with that reading rather than contradicting it.
+
+#### Pooled by business model (stages 2/3/4, verdicts still per-cell)
+
+| Group | absolute | percentile | regime | rolling | strict rolling |
+|---|--:|--:|--:|--:|--:|
+| semi_hardware | +6.2 ✓ | +0.1 n.d. | +5.5 ✓ | +5.9 ✓ | +4.1 ✓ |
+| saas | +10.2 ✓ | −3.8 n.d. | +6.1 ✓ | −2.4 n.d. | −3.5 n.d. |
+| consumer_internet | +9.5 ✓ | **−7.4 CONTRADICTS** | −3.7 n.d. | **−5.5 CONTRADICTS** | −5.1 n.d. |
+
+**semi_hardware is the only group whose signal survives every drift-corrected
+scheme** (+4.1 to +5.9, CI excludes zero in three of four). saas survives only
+under the hindsight-using regime scheme. consumer_internet inverts.
+
+#### Recommendation
+
+- **Live tool → scheme D (rolling).** Point-in-time, self-recalibrating, no era
+  to guess, and it keeps an absolute-ish judgement. Cost: a warm-up period.
+  With a minimum-20-*observations* rule it covers 97.3% of rows; requiring a
+  full 20 *quarters* it covers 74.7% and starts 2017-01.
+- **Do not ship scheme C (regime).** Its bands are fitted on the whole era
+  including its future, and live you would be guessing the current regime — the
+  concern raised was correct, and the numbers confirm the advantage is partly
+  hindsight.
+- **Report scheme B (percentile) alongside any result** as the honesty check.
+  It is the only scheme where the 2012-vs-2026 problem cannot arise.
+
+### CVE robustness checks — `backtest_version = '1.2-ROBUST'` (`cve_checks.py`)
+
+**The single most important result of the whole project: the bootstrap CI was
+systematically misleading on every unbalanced-leg scheme.** It resamples within
+legs, so it cannot see a bias living in cross-group weighting. Every "CONFIRMS"
+previously reported under absolute, regime or rolling bands must be re-read
+against a shuffled null. Only the percentile scheme has a null at zero by
+construction (it assigns exactly k/k labels per group).
+
+**Check 1 — placebo. HARNESS PASSES.** Pooled placebo distribution centred at
+**−0.014pp (sd 0.85)** over 500 within-(cell,quarter) label shuffles, so the
+spread computation, grouping and forward-return join are sound.
+- Real percentile pooled −2.93 sits OUTSIDE the null (p=0.000): the
+  cross-sectional result is a small but genuine **inversion**, not an absence.
+- saas-2 −14.97 (p=0.000) real inversion · deep_tech-3 +22.59 (p=0.018) ·
+  semi_hardware-3 −0.16 (p=0.914) truly null.
+- **The rolling-band null is centred at +5.06pp, not zero.** The real
+  semi_hardware rolling result (+5.95) sits inside it, **p=0.29**.
+
+**Check 2 — split width.** No tail effect. semi_hardware pooled +0.4 / +0.1 /
+−1.9 / −3.6 at halves/terciles/quintiles/deciles, never significant. The saas
+inversion deepens monotonically toward the tails (−2.2 → −10.7 pooled; saas-2
+−12.4 → −23.0, significant at every width). **deep_tech-3 does not survive**:
++22.6 at terciles but **+0.4 at halves on its largest sample (96/96)** — a
+split-width artefact, retracted. Coverage 96.8/93.4/88.9/88.9%.
+
+**Check 3 — sub-period.** semi_hardware null in both halves (−0.2 then +0.6).
+consumer_internet existed early and decayed (−12.3 [−18,−6] → −5.2 n.s.).
+saas-2 is the exception — it STRENGTHENED (−7.3 → **−18.2 [−28,−6]**). Early
+period carries only 45–48% of the panel, so the two halves are not equally
+powered.
+
+**Check 4 — out-of-sample. THE SEMICONDUCTOR RESULT COLLAPSES.** A band frozen
+on 2012–2019 medians gives OOS +14.3 [+7.7,+20.4] "CONFIRMS" — but legs are
+495/1605 (balance 0.31) and its placebo null is centred at **+11.16**
+[+6.46,+16.29]. Real excess **+3.19pp, empirical p=0.106**. In-sample it scores
++1.72 against a +3.21 null (p=0.85), i.e. below its own null.
+
+**Verdict: treat the matrix as null for stock selection.** semi_hardware
+returned null on four independent tests (percentile, all split widths, both
+sub-periods, out-of-sample). The earlier +5.5/+5.9/+4.1 marks were the
+leg-imbalance artefact.
+
+**Check 5 — cell correlation.** 17 cells with ≥20 quarters of z-score history.
+**Mean off-diagonal pairwise correlation +0.143; only 0.7% of 136 pairs exceed
+0.7.** The cells are NOT redundant — they do carry largely independent timing
+information, so a cell-level signal is not "a sector signal with extra steps".
+Correlation with the sector aggregate ranges +0.008 (consumer_internet-4) to
++0.755 (semi_hardware-3), mean +0.414.
+- **Semis do NOT cleanly decouple.** semi_hardware averages +0.335 vs the
+  all-cell +0.414, but that average is dragged down by its two thinnest cells
+  (semi_hardware-1 +0.010 on 28 quarters, -4 +0.183). The best-populated semi
+  cell, **semi_hardware-3, is the MOST sector-correlated cell in the matrix at
+  +0.755**. The cycle-independence story is not supported.
+- Caveat: the sector aggregate is the median of the cell z-scores, so each
+  cell partially self-correlates with it; treat the vs-sector column as an
+  upper bound.
+
+**What survives everything:** (1) the **saas-2 inversion** — robust across split
+widths, strengthening post-2019, p=0.000 against its null; (2) a **cohort-timing
+effect** that is real but is not stock selection.
+
+### SHIPPED — rolling bands + rewritten platform claims (2026-08-16)
+
+**Rolling bands are live.** `build_cell_bands.py` computes, per cell, the median
+primary metric over the trailing 20 quarters and writes
+`band = 0.7x .. 1.3x median` into a new **`cell_bands`** table, which ships in
+the slim DB (`build_repo_db.py` keep-list updated). **17 of 20 cells get a
+rolling band; 3 fall back to the static v2 numbers** (deep_tech-4,
+hyperscale-1, hyperscale-4 — too thin) and the UI says so.
+
+`valuation_engine.verdict(cell, metrics, bands=None)` takes an optional band
+override — still ONE verdict function. A rolling band replaces only the
+numbers; the metric, its direction, and the deep_tech-1 pre-revenue switch are
+properties of the cell and never move. `app.py` loads bands via
+`_get_cell_bands()` (cached 1h) and renders them through `fair_rows_for()`;
+only the PRIMARY row is re-centred, secondary qualifiers keep reference ranges.
+
+Selected new bands vs the old static ones:
+
+| Cell | static | rolling | cohort median |
+|---|---|---|--:|
+| saas-2 | 8–18 | **3.81–7.08** | 5.45 |
+| consumer_internet-2 | 4–10 | **1.44–2.67** | 2.05 |
+| consumer_internet-3 | 18–30 | **11.37–21.11** | 16.24 |
+| semi_hardware-2 | 1.5–4.0 | **1.31–2.44** | 1.88 |
+| semi_hardware-3 | 20–35 | **22.50–41.79** | 32.14 |
+
+This also retires the saas-2 ARR band mismatch flagged in Phase 2 — the cell is
+now judged against the cohort's own EV/NTM Rev history (5.45x) rather than a
+band calibrated for ARR (8–18x) it could never meet.
+
+Every band carries provenance in the UI: *"Fair range = 0.7x-1.3x the cohort's
+median of 16.24, measured over 2021-10-01 to 2026-07-01 (913 observations). It
+re-centres each quarter as the cohort re-rates."*
+
+**Claims rewritten** in `app.py` (About page x3 sections, interpretation
+disclaimer) and `backtest_page.py` (limitations panel):
+- The tool states plainly that it shows **where a cohort sits versus its own
+  history**, and that it **does not** identify which stock within a cohort to
+  buy — naming the evidence (no advantage at any split width, either
+  sub-period, or out-of-sample).
+- The Backtest page leads its limitations with the failed cross-sectional
+  claim and with the bootstrap/unbalanced-legs caveat, so nobody reads the
+  portfolio numbers without it.
+
+**Not pushed** — local only. Run `build_cell_bands.py` then `build_repo_db.py`
+after any panel rebuild, or the shipped bands go stale.
+
+### Two product fixes (2026-08-16)
+
+**1. Verdict SUPPRESSED in `saas-2` and `consumer_internet-2`.** The evidence
+says a low multiple there signals decelerating growth, not value (saas-2 -15pp
+at terciles / -23pp at deciles, p=0.000, strengthening post-2019;
+consumer_internet-2 -10.3pp). `valuation_engine.SUPPRESSED_CELLS` withholds the
+cheap/expensive judgement and states why; the multiple is still shown. **Not
+inverted** — one robust negative is not a tradable positive. `build_panel.py`
+passes `respect_suppression=False` so the research record keeps measuring it.
+A third inline copy of the verdict rule in `app.py` (line ~3216) was routed
+through the engine at the same time — it would have bypassed the suppression.
+
+**2. `it_services` category added; 32 tickers moved out of the `deep_tech`
+residual bucket** (`reclassify_it_services.py`), including JKHY, ACIW, LDOS,
+CACI, ACN, CTSH. They carry an honest label and **no verdict** — the engine has
+five calibrated models and none fit labour-based services, so inventing a band
+would swap a false label for a false number. Membership is AV's own
+`industry = INFORMATION TECHNOLOGY SERVICES` plus explicit adds/holds; the raw
+tag over-reached and was blocked from moving IBM (a deliberate override), APLD
+(data centres), CIFR/CORZ (bitcoin/HPC) and INOD. Panel 17,291 -> 16,029 rows
+(1,262 it_services stock-quarters now have no cell, by design).
+Category lists in `app.py` now come from `_ve.CATEGORY_ORDER/CATEGORY_LABELS` —
+a hardcoded 5-item list had already hidden the new group from the universe grid
+while the footer counted 6.
+
+**Three follow-on defects the reclassification exposed, all fixed:**
+- The suppression notice was nested inside `if fair_rows:`. A no-model category
+  has NO fair rows, so an IT-services user saw a blank panel and no explanation
+  — the one case that most needs one. Moved out of that block.
+- **`valuations.matrix_cell` went stale**: `classifications` said
+  `it_services-4`, `valuations` still said `deep_tech-4`, so the app would
+  render the OLD cell's fair ranges for a renamed name. Synced (32 rows), and
+  **new integrity test R6** now fails if the two tables ever disagree again.
+- **R5 was re-deriving panel verdicts with suppression ON** while the panel
+  stores them with it OFF, producing 10 false blanks. Both the blank check and
+  the panel re-derivation now pass `respect_suppression=False`, and R5 gained a
+  positive assertion that suppression still bites on the product path (so
+  deleting `SUPPRESSED_CELLS` fails the gate rather than passing silently).
+
+**3. `deep_tech` relabelled → "Mixed / Pre-Revenue"** (2026-08-16). After the
+it_services move the bucket still held **48 tickers across 14 AV industries** —
+13 application software, 8 infrastructure software, 7 semiconductors, 4 hardware,
+4 aerospace, plus utilities, internet retail and financial data. Genuine deep
+tech is a minority. The rule is literally "no dominant revenue stream >=40%, or
+pre-revenue", so the label now states that. `CATEGORY_NOTES` surfaces a note on
+the Analysis page and the About copy explains it is a residual bucket, not a
+thesis.
+
+**The internal key stays `deep_tech` deliberately** — it is embedded in
+matrix_cell strings across `classifications`, `valuations`, `backtest_panel`,
+`cell_bands`, `backtest_cell_stats` and every stored 1.1-RR / 1.2-ROBUST
+result. Renaming it would orphan all of that for a cosmetic gain; the label is
+what users read, and the label is now accurate.
+
 ### Files added this session
 `build_panel.py` · `analyze_test1.py` · `classify_delisted_offline.py` ·
 `to_classify.txt` · `test1_cell_stats.csv` · `classify_backtest_universe.log` ·
 `analyze_test2.py` · `test2_transitions.csv` · `portfolio_sim.py` ·
-`price_integrity_check.py` · `Valuora_Previous_UI/backtest_page.py`
+`price_integrity_check.py` · `Valuora_Previous_UI/backtest_page.py` ·
+`integrity_check.py` · `integrity_failures.csv` · `integrity_run.log` ·
+`phase1_clean.py` · `valuation_engine.py` · `analyze_test1_rr.py` ·
+`test1_rr_cell_stats.csv` · `test1_rr_run.log` ·
+`analyze_bands.py` · `band_variants.csv` · `band_variants.log` ·
+`cve_checks.py` · `check1_placebo.csv/.log` · `check2_splits.csv/.log` ·
+`check3_subperiod.csv/.log` · `check4_oos.csv/.log` · `check4_null.log` ·
+`check5_correlation.csv/.log` · `build_cell_bands.py`
 
 ---
 
@@ -1253,6 +1687,8 @@ LIMIT 1` to those queries in `app.py`** — see Known Open Items.
 |------|----------|-------|
 | **Hyperscale category split — DEFERRED** | Decided | Splitting `hyperscale` into *pure cloud infrastructure* (MSFT/GOOGL/AMZN/CRWV/NBIS — usage-based compute, extreme CapEx) vs *diversified mega-cap* (IBM/ORCL — mixed legacy services + cloud) was considered and **deliberately deferred until after the backtest**. The two groups have genuinely different CapEx intensity and margin structure, and an 8-ticker category spanning both is doing real work to hold them together. But re-cutting the taxonomy now would invalidate the historical backfill: `fh_stage_history`, `stage_change_log` and every stored `valuations` row are keyed to the current `matrix_cell` strings, so a split means re-running the whole backfill against a moving target. **Backtest against the frozen v2 taxonomy first, then split with a `MATRIX_VERSION` bump and one clean re-run.** |
 | ~~Rule 1 not implemented~~ | **DONE 2026-08-11** | Implemented at two layers (ingest truncation in `backfill_fundamentals.py`, read guard in `backtester.py::get_price_on_date`) and verified: DB-wide assertion returns 0 rows past any delisting date; SPLK ends exactly 2024-03-15 with 153 frozen bars discarded. Full results in `BACKTEST_RULES.md`. |
+| **`reported_date <= fiscal_date` on 554 rows** | **High** | A quarter cannot be filed before it ends; 471 rows sit on panel tickers. The panel's `COALESCE(reported_date, fiscal_date+45d)` gate trusts these, admitting filings ~30-45 days before they were public. Fix: treat `reported_date <= fiscal_date` as NULL so the +45d fallback applies. Found by `integrity_check.py` T1. |
+| **Mid-series currency changes (NBIS/MIXT/LN)** | **High** | The B6 gate reads yfinance's *current* `financialCurrency` and cannot see a currency change within a ticker's history. NBIS mixes RUB:173 / USD:22 and is 1 of 8 hyperscale names. Fix: gate on per-row `reportedCurrency` from the raw JSON. Found by `integrity_check.py` F5. |
 | **Splits corrupt stored price history** | **High** | `price_data` is back-adjusted but written `INSERT OR IGNORE`, so a split leaves the series spliced across two scales (KLAC 10x, CRWD 4x — both repaired 2026-08-11). Detector + repair: `price_integrity_check.py [--fix]`. **Run it after every backfill.** Real fix = re-write history on split detection instead of ignoring existing rows. Delisted names (AV-sourced) cannot be checked this way. |
 | **Backtest #1 pass conditions: only #1 passes** | **High** | Portfolio loses to QQQ and to the equal-weight universe at every concentration; Test 2 is a clean negative. Fix the rules before re-running — see the handoff header. |
 | **`app.py` reads `computed_metrics` / `valuations` with no `ORDER BY`** | **High** | Every query is a bare `WHERE ticker=?`. Both tables can legitimately hold more than one row per ticker (a new fiscal quarter writes a new `as_of_date`), and SQLite will then serve whichever row it finds first — the stale one. `refresh_metrics.py` prunes as a stopgap; the fix is `ORDER BY as_of_date DESC LIMIT 1` at app.py lines 196, 202, 1370, 2883, 2941, 2947, 3236, 3839. |

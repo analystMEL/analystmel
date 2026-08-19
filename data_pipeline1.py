@@ -647,6 +647,139 @@ def _ltm_sum(series: list[dict], field: str, n: int = 4) -> float:
     return sum(_safe_float(q.get(field)) for q in series[:n])
 
 
+DATA_QUALITY_REVIEW = []   # (ticker, issue, detail) — surfaced by refresh_metrics
+
+
+def _periods_per_year(series: list[dict]) -> int:
+    """How many stored periods make up ~12 months for this filer.
+
+    Not every filer reports quarterly. A handful of foreign issuers file
+    SEMI-ANNUALLY (measured 2026-08: EPWK and WSE, ~182-day periods), and
+    blindly summing 4 periods for them books TWO YEARS of revenue as LTM —
+    roughly doubling revenue and every margin denominator downstream.
+    Returns 4 (quarterly), 2 (semi-annual) or 1 (annual).
+    """
+    dates = []
+    for q in series[:5]:
+        fd = q.get("fiscal_date") or q.get("fiscalDateEnding")
+        if fd:
+            try:
+                dates.append(datetime.strptime(fd[:10], "%Y-%m-%d"))
+            except ValueError:
+                pass
+    if len(dates) < 3:
+        return 4
+    gaps = sorted((dates[i] - dates[i + 1]).days for i in range(len(dates) - 1))
+    median_gap = gaps[len(gaps) // 2]
+    if median_gap > 270:
+        return 1
+    if median_gap > 150:
+        return 2
+    return 4
+
+
+def _gross_profit_ltm(series: list[dict], n: int, ticker: str = "") -> float:
+    """LTM gross profit, guarding against AV's corrupt `grossProfit` field.
+
+    AV occasionally ships a wrong `grossProfit` in the newest quarter while
+    `totalRevenue` and `costOfRevenue` stay correct. Measured 2026-08 across
+    457 tickers — 7 tickers, 11 quarters — in three shapes:
+      - grossProfit == totalRevenue with a non-zero COGS  (TTD: 100% gross
+        margin instead of 74%, which reads as premium SaaS to the validators)
+      - grossProfit negative while revenue exceeds COGS   (XPER: -$88M vs +$80M)
+      - grossProfit missing entirely                      (MBGL)
+    In every checked case `totalRevenue - costOfRevenue` reproduces the figure
+    yfinance reports, so it is the fallback. Gross margin feeds the SaaS /
+    hyperscale / semi_hardware validators AND carries 15% weight in every FH
+    stage, so a corrupt value can misclassify both axes at once.
+    """
+    total = 0.0
+    for q in series[:n]:
+        rev = _safe_float(q.get("totalRevenue"))
+        cogs = _safe_float(q.get("costOfRevenue"))
+        gp = _av_num(q.get("grossProfit"))
+        derived = (rev - cogs) if (rev is not None and cogs is not None) else None
+        use, why = gp, None
+        if gp is None:
+            use, why = derived, "grossProfit missing"
+        elif rev and cogs and cogs > rev * 0.02 and abs(gp - rev) < 1:
+            use, why = derived, "grossProfit == revenue (COGS ignored)"
+        elif gp < 0 and rev is not None and cogs is not None and rev > cogs:
+            use, why = derived, "grossProfit negative but revenue > COGS"
+        if why and derived is not None:
+            DATA_QUALITY_REVIEW.append(
+                (ticker, "gross_profit_corrected",
+                 f"{q.get('fiscal_date', '?')}: {why} — used revenue-COGS "
+                 f"({derived:,.0f}) instead of {gp}"))
+            log.warning(f"[{ticker}] {why} at {q.get('fiscal_date','?')} — "
+                        f"using revenue-COGS ({derived:,.0f}).")
+        total += (use or 0.0)
+    return total
+
+
+MCAP_RECONCILE_TOLERANCE = 0.25   # >25% disagreement between sources = review
+MCAP_REVIEW = []                  # (ticker, source, computed, overview, note)
+
+
+def _resolve_market_cap(conn, ticker, latest_bs, yf_shares, yf_market_cap):
+    """Resolve (market_cap, shares_outstanding, source, flag) from AV first.
+
+    Preference order and why — see the long comment at the call site:
+      1. latest close x AV balance-sheet shares  (all share classes, and always
+         current with `price_data`, so it can never go stale)
+      2. AV OVERVIEW MarketCapitalization        (used when 1 disagrees with it
+         beyond tolerance, which catches AV's bad ADR / reverse-split counts)
+      3. yfinance                                (last resort only)
+
+    Every source disagreement is recorded in MCAP_REVIEW rather than silently
+    resolved, because neither provider is right often enough to trust blindly.
+    """
+    px = conn.execute(
+        "SELECT close FROM price_data WHERE ticker=? ORDER BY date DESC LIMIT 1",
+        (ticker,)).fetchone()
+    price = px[0] if px else None
+
+    av_shares = _av_num((latest_bs or {}).get("commonStockSharesOutstanding"))
+    ov = conn.execute("SELECT raw_json FROM overview_cache WHERE ticker=?", (ticker,)).fetchone()
+    ov_mcap = ov_shares = None
+    if ov and ov[0]:
+        try:
+            o = json.loads(ov[0])
+            ov_mcap = _av_num(o.get("MarketCapitalization"))
+            ov_shares = _av_num(o.get("SharesOutstanding"))
+        except Exception:
+            pass
+
+    computed = price * av_shares if (price and av_shares and av_shares > 0) else None
+
+    # Both available → reconcile.
+    if computed and ov_mcap and ov_mcap > 0:
+        div = abs(computed / ov_mcap - 1)
+        if div <= MCAP_RECONCILE_TOLERANCE:
+            return computed, av_shares, "av_bs_x_price", 0
+        implied = ov_mcap / price if price else None
+        MCAP_REVIEW.append((ticker, "conflict", computed, ov_mcap,
+                            f"AV bs shares={av_shares:,.0f} implies ${computed/1e9:.1f}bn "
+                            f"but OVERVIEW says ${ov_mcap/1e9:.1f}bn "
+                            f"({div*100:.0f}% apart); using OVERVIEW, implied shares="
+                            f"{implied:,.0f}" if implied else "no price"))
+        log.warning(f"[{ticker}] market-cap sources disagree {div*100:.0f}% — "
+                    f"computed ${computed/1e9:.2f}bn vs OVERVIEW ${ov_mcap/1e9:.2f}bn; using OVERVIEW.")
+        return ov_mcap, (implied or av_shares), "av_overview_conflict", 1
+
+    if computed:
+        return computed, av_shares, "av_bs_x_price", 0
+    if ov_mcap and ov_mcap > 0:
+        implied = ov_mcap / price if price else ov_shares
+        return ov_mcap, implied, "av_overview", 0
+    if yf_market_cap:
+        MCAP_REVIEW.append((ticker, "yf_fallback", None, yf_market_cap,
+                            "no AV shares and no OVERVIEW mcap — fell back to yfinance"))
+        log.warning(f"[{ticker}] no AV market-cap source — falling back to yfinance.")
+        return yf_market_cap, yf_shares, "yfinance_fallback", 1
+    return None, yf_shares, "none", 1
+
+
 def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
     """
     Derives clean LTM metrics from raw quarterly fundamentals and writes to
@@ -669,25 +802,36 @@ def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
 
     as_of_date = inc[0]["fiscal_date"]  # most recent quarter end
 
+    # Filing periodicity: 4 periods = 12 months for a normal quarterly filer,
+    # but 2 for a semi-annual one. Everything below sizes its LTM window off
+    # this instead of assuming 4. See _periods_per_year.
+    n_ltm = _periods_per_year(inc)
+    n_prior = n_ltm * 2
+    if n_ltm != 4:
+        DATA_QUALITY_REVIEW.append(
+            (ticker, "non_quarterly_filer",
+             f"reports {n_ltm} period(s)/year — LTM summed over {n_ltm} periods, not 4"))
+        log.warning(f"[{ticker}] non-quarterly filer: summing {n_ltm} periods for LTM.")
+
     # --- Income statement LTM ---
-    revenue_ltm          = _ltm_sum(inc, "totalRevenue")
-    gross_profit_ltm     = _ltm_sum(inc, "grossProfit")
-    op_income_ltm        = _ltm_sum(inc, "operatingIncome")
-    ebit_ltm             = _ltm_sum(inc, "ebit")
-    net_income_ltm       = _ltm_sum(inc, "netIncome")
+    revenue_ltm          = _ltm_sum(inc, "totalRevenue", n_ltm)
+    gross_profit_ltm     = _gross_profit_ltm(inc, n_ltm, ticker)
+    op_income_ltm        = _ltm_sum(inc, "operatingIncome", n_ltm)
+    ebit_ltm             = _ltm_sum(inc, "ebit", n_ltm)
+    net_income_ltm       = _ltm_sum(inc, "netIncome", n_ltm)
     sbc_ltm              = _ltm_sum(inc, "researchAndDevelopment")  # placeholder —
     # NOTE: AV Income Statement does not expose SBC directly.
     # The correct field is in the Cash Flow statement as "stockBasedCompensation".
-    sbc_ltm              = _ltm_sum(cf, "stockBasedCompensation")
+    sbc_ltm              = _ltm_sum(cf, "stockBasedCompensation", n_ltm)
 
     # Prior year LTM for growth calculations (quarters 5-8)
-    revenue_prior        = _ltm_sum(inc, "totalRevenue", 8) - revenue_ltm
-    op_income_prior      = _ltm_sum(inc, "operatingIncome", 8) - op_income_ltm
+    revenue_prior        = _ltm_sum(inc, "totalRevenue", n_prior) - revenue_ltm
+    op_income_prior      = _ltm_sum(inc, "operatingIncome", n_prior) - op_income_ltm
 
     # --- Cash flow LTM ---
-    ocf_ltm   = _ltm_sum(cf, "operatingCashflow")
+    ocf_ltm   = _ltm_sum(cf, "operatingCashflow", n_ltm)
     # AV reports capex as negative — take absolute value
-    capex_ltm = abs(_ltm_sum(cf, "capitalExpenditures"))
+    capex_ltm = abs(_ltm_sum(cf, "capitalExpenditures", n_ltm))
     fcf_ltm   = ocf_ltm - capex_ltm
 
     # --- Balance sheet (most recent quarter only — point-in-time) ---
@@ -709,7 +853,7 @@ def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
     current_liabilities = _av_first(latest_bs, "totalCurrentLiabilities", "currentNetLiabilities")
 
     # R&D expense LTM (from income statement)
-    rd_expense_ltm   = _ltm_sum(inc, "researchAndDevelopment")
+    rd_expense_ltm   = _ltm_sum(inc, "researchAndDevelopment", n_ltm)
 
     # --- Derived ratios ---
     def pct(numerator, denominator):
@@ -793,13 +937,13 @@ def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
     # older names below are AV fallbacks/legacy and almost always absent. Using
     # only the wrong name silently zeroed D&A → EBITDA collapsed to operating
     # income and every EV/EBITDA cell was understated.
-    da_ltm = (_ltm_sum(cf, "depreciationDepletionAndAmortization")
-              or _ltm_sum(cf, "depreciationAmortization")
-              or _ltm_sum(cf, "depreciation"))
+    da_ltm = (_ltm_sum(cf, "depreciationDepletionAndAmortization", n_ltm)
+              or _ltm_sum(cf, "depreciationAmortization", n_ltm)
+              or _ltm_sum(cf, "depreciation", n_ltm))
     ebitda_ltm = (op_income_ltm or 0) + (da_ltm or 0) if op_income_ltm is not None else None
 
     # Prior year net income (quarters 5-8) for PEG calculation
-    net_income_prior = _ltm_sum(inc, "netIncome", 8) - net_income_ltm
+    net_income_prior = _ltm_sum(inc, "netIncome", n_prior) - net_income_ltm
 
     # Shares outstanding, market cap, financialCurrency, AND deferred revenue
     # from yfinance. AV doesn't expose deferredRevenue (every ticker returns
@@ -811,12 +955,36 @@ def compute_and_store_metrics(conn: sqlite3.Connection, ticker: str) -> bool:
     try:
         tk = yf.Ticker(ticker)
         info = tk.info
-        shares_outstanding = info.get("sharesOutstanding")
-        market_cap = info.get("marketCap")
+        yf_shares = info.get("sharesOutstanding")
+        yf_market_cap = info.get("marketCap")
         financial_currency = info.get("financialCurrency")
     except Exception:
-        shares_outstanding = None
-        market_cap = None
+        yf_shares = None
+        yf_market_cap = None
+
+    # --- Market cap / shares: AV first, yfinance as cross-check only ------
+    # yfinance is NOT authoritative here. Two measured failure modes (2026-08):
+    #
+    #  1. DUAL-CLASS UNDERCOUNT. `sharesOutstanding` reports only the listed
+    #     class, so market cap is understated — TEAM 160M vs 253M actual,
+    #     WDAY 204M vs 254M, NET 320M vs 354M. A ~35% understated market cap
+    #     makes EV/Revenue look cheap and FCF yield look high, biasing the
+    #     verdict toward "undervalued" for every dual-class company.
+    #  2. STALENESS. `market_cap` was frozen at whatever price applied when the
+    #     pipeline last ran; SNOW was stored at $57.9bn against a live $115.6bn.
+    #
+    # AV's balance-sheet `commonStockSharesOutstanding` counts all classes and
+    # is point-in-time consistent with every other statement-derived metric, so
+    # market cap is recomputed from it against the latest close.
+    #
+    # AV is not universally right either — for some ADRs and post-reverse-split
+    # names its share count is wrong by orders of magnitude (SIMO, TDTH, XPER).
+    # So the AV-derived figure is reconciled against AV OVERVIEW's own
+    # MarketCapitalization: agreement within tolerance means use the
+    # price-consistent computed value; disagreement means trust OVERVIEW,
+    # back out implied shares, and flag the ticker for review.
+    market_cap, shares_outstanding, mcap_source, mcap_flag = _resolve_market_cap(
+        conn, ticker, latest_bs, yf_shares, yf_market_cap)
 
     reported_currency = financial_currency or "USD"
     if financial_currency and financial_currency != "USD":
@@ -1605,18 +1773,24 @@ MATRIX_VERSION = "v2-2026-08"
 
 VALUATION_MATRIX = {
     ("saas", 1):             "EV/NTM Revenue",
-    ("saas", 2):             "EV/NTM ARR",
+    # ARR is only known where manual_metrics carries it, so the cell also routes
+    # EV/NTM Revenue as the documented ARR substitute — without it saas-2 renders
+    # no verdict on 24 of 25 rows.
+    ("saas", 2):             "EV/NTM ARR and EV/NTM Revenue",
     ("saas", 3):             "EV/FCF and PEG",
     ("saas", 4):             "FCF yield and EV/FCF and P/E and PEG",
-    ("hyperscale", 1):       "EV/Revenue and CapEx/TTM Revenue",
+    # S1 cells: the documented primary is EV/NTM Rev. They previously routed to
+    # methods computing neither ev_ntm_revenue nor ev_ntm_arr, so all three
+    # rendered a blank verdict in the app (integrity R5).
+    ("hyperscale", 1):       "EV/NTM Revenue and CapEx/TTM Revenue",
     ("hyperscale", 2):       "EV/NTM Revenue",
     ("hyperscale", 3):       "CapEx-adjusted EV/EBIT and PEG",
     ("hyperscale", 4):       "FCF yield and PEG",
-    ("semi_hardware", 1):    "EV/Revenue and CapEx/TTM Revenue",
+    ("semi_hardware", 1):    "EV/NTM Revenue and CapEx/TTM Revenue",
     ("semi_hardware", 2):    "EV/NTM Revenue",
     ("semi_hardware", 3):    "Cycle-adjusted P/E",
     ("semi_hardware", 4):    "FCF yield and P/E and PEG",
-    ("consumer_internet", 1): "P/S and MAU",
+    ("consumer_internet", 1): "EV/NTM Revenue and P/S and MAU",
     ("consumer_internet", 2): "EV/NTM Revenue",
     ("consumer_internet", 3): "EV/EBITDA and PEG",
     ("consumer_internet", 4): "P/E and EV/EBITDA and PEG",
